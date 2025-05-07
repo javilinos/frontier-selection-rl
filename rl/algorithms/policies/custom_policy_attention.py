@@ -1,3 +1,16 @@
+import os
+import sys
+
+# Get the directory of the current file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Define the subdirectory path
+features_dir = os.path.join(current_dir, 'features_extractors')
+
+sys.path.append(features_dir)
+
+from attention_network import AttentionExtractor
+from custom_cnn import NatureCNN_Mod
 from torch import nn
 from stable_baselines3.common.type_aliases import PyTorchObs, Schedule
 from stable_baselines3.common.preprocessing import preprocess_obs
@@ -26,13 +39,6 @@ import collections
 import warnings
 from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
-import os
-import sys
-
-sys.path.append(os.path.abspath(
-    '/home/javilinos/Desktop/as2_projects/project_rl/rl/algorithms/policies/features_extractors'))
-from custom_cnn import NatureCNN_Mod
-from attention_network import AttentionExtractor
 
 
 class ActorCriticPolicy(BasePolicy):

@@ -1,3 +1,14 @@
+import os
+import sys
+
+# Get the directory of the current file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Define the subdirectory path
+features_dir = os.path.join(current_dir, 'policies')
+
+sys.path.append(features_dir)
+
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn, obs_as_tensor
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.buffers import DictRolloutBuffer
@@ -20,11 +31,7 @@ import torch as th
 import numpy as np
 from typing import Any, ClassVar, Dict, Optional, Type, TypeVar, Union
 import warnings
-from .policies.custom_policy_attention import ActorCriticPolicy, ActorCriticCnnPolicy, MultiInputActorCriticPolicy, BasePolicy
-from .policies.custom_policy_attention import ActorCriticPolicy, ActorCriticCnnPolicy, MultiInputActorCriticPolicy, BasePolicy
-import os
-import sys
-
+from custom_policy_attention import ActorCriticPolicy, ActorCriticCnnPolicy, MultiInputActorCriticPolicy, BasePolicy
 
 # from stable_baselines3.common.buffers import RolloutBuffer
 # from stable_baselines3.common.policies import ActorCriticCnnPolicy, ActorCriticPolicy, BasePolicy, MultiInputActorCriticPolicy
