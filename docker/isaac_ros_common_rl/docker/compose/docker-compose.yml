@@ -1,0 +1,26 @@
+services:
+  ros2:
+    image: isaac_ros_dev-x86_64
+    container_name: rl_container
+    environment:
+      DISPLAY: $DISPLAY
+      XAUTHORITY: $XAUTHORITY
+      SSH_AUTH_SOCK: $SSH_AUTH_SOCK
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+    runtime: nvidia
+    privileged: true
+    restart: always
+    volumes:
+      # display related 
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ~/.Xauthority:/root/.Xauthority:rw
+      # ssh related
+#      - $SSH_AUTH_SOCK:$SSH_AUTH_SOCK:ro
+      # git
+      - ~/.gitconfig:/root/.gitconfig_local
+      # working dirs
+      - ~/Desktop/as2_projects/project_rl:/root/project_rl
+    network_mode: "host"
+    command: tail -f /dev/null
+    working_dir: /root

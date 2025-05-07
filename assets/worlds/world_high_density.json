@@ -1,0 +1,19 @@
+{
+    "world_name": "world_high_density",
+    "drones": [
+        {
+            "model_type": "quadrotor_base",
+            "model_name": "drone0",
+            "xyz": [-3.56, -0.39, 0],
+            "rpy": [0, 0, 4.31],
+            "flight_time": 60,
+            "payload": [
+                {
+                    "model_type": "planar_lidar",
+                    "model_name": "lidar",
+                    "xyz": [0, 0, -0.5]
+                }
+            ]
+        }
+    ]
+}

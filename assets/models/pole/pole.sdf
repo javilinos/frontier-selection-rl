@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+    <model name="pole">
+        <link name="pole_link">
+
+            <visual name='visual'>
+                <geometry>
+                    <cylinder>
+                        <radius>0.25</radius>
+                        <length>5.0</length>
+                    </cylinder>
+                </geometry>
+                <material>
+                    <diffuse>0 0 0 1</diffuse>
+                </material>
+            </visual>
+
+            <inertial>
+                <mass>0.005</mass>
+                <inertia>
+                    <ixx>8.33e-06</ixx>
+                    <ixy>0</ixy>
+                    <ixz>0</ixz>
+                    <iyy>8.33e-06</iyy>
+                    <iyz>0</iyz>
+                    <izz>8.33e-06</izz>
+                </inertia>
+            </inertial>
+
+            <!-- <collision name="collision">
+                <geometry>
+                    <cylinder>
+                        <radius>0.25</radius>
+                        <length>5.0</length>
+                    </cylinder>
+                </geometry>
+            </collision> -->
+        </link>
+        <!-- <frame name="mount_point"/> -->
+
+        <!-- <joint name="world_to_base_link=" type="fixed">
+            <parent>world</parent>
+            <child>pole_link</child>
+        </joint> -->
+    </model>
+</sdf>

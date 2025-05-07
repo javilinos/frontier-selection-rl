@@ -1,0 +1,38 @@
+/**:
+  # Global Parameters
+  ros__parameters:
+    use_sim_time: true
+    tf_timeout_threshold: 0.0
+
+  # Basic Robotics Functions
+  # State Estimator
+  state_estimator:
+    ros__parameters:
+      plugin_name: "ground_truth"
+      use_gazebo_tf: true
+      # # Outdoor (GPS)
+      # use_gps: true
+      # set_origin_on_start: true
+      # set_origin:
+      #   lat: 40.337494
+      #   lon: -3.883197
+      #   alt: 100.0
+
+  # Behaviors Motion
+  TakeoffBehavior:
+    ros__parameters:
+      # takeoff_plugin_name: "takeoff_plugin_speed"
+      takeoff_plugin_name: "takeoff_plugin_position"
+      # takeoff_plugin_name: "takeoff_plugin_trajectory"
+  LandBehavior:
+    ros__parameters:
+      land_plugin_name: "land_plugin_speed"
+      # land_plugin_name: "land_plugin_trajectory"
+  GoToBehavior:
+    ros__parameters:
+      go_to_plugin_name: "go_to_plugin_position"
+      # go_to_plugin_name: "go_to_plugin_trajectory"
+  FollowPathBehavior:
+    ros__parameters:
+      follow_path_plugin_name: "follow_path_plugin_position"
+      # follow_path_plugin_name: "follow_path_plugin_trajectory"

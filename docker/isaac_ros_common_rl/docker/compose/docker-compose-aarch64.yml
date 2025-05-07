@@ -1,0 +1,32 @@
+services:
+  ros2:
+    image: isaac_ros_dev-aarch64
+    container_name: arquimea_container
+    environment:
+      DISPLAY: $DISPLAY
+      XAUTHORITY: $XAUTHORITY
+      SSH_AUTH_SOCK: $SSH_AUTH_SOCK
+    runtime: nvidia
+    privileged: true
+    restart: always
+    volumes:
+      # display related 
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ~/.Xauthority:/root/.Xauthority:rw
+      # ssh related
+      # - $SSH_AUTH_SOCK:$SSH_AUTH_SOCK
+      # git
+      - ~/.gitconfig:/root/.gitconfig_local
+      # working dirs
+      # - ~/ultralytics:/root/ultralytics
+      # - ~/minerva_training:/root/arquimea
+      # aarch64 related
+      - /usr/bin/tegrastats:/usr/bin/tegrastats
+      - /tmp/:/tmp/
+      - /usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra
+      - /usr/src/jetson_multimedia_api:/usr/src/jetson_multimedia_api
+      - /usr/share/vpi3:/usr/share/vpi3
+      - /dev/input:/dev/input
+    network_mode: "host"
+    command: tail -f /dev/null
+    working_dir: /root

@@ -1,0 +1,23 @@
+<%
+# Input parameters
+simulation_config   = @settings["simulation_config"]
+
+%>
+attach: false
+root: ./
+startup_window: mapping
+windows:
+  - mapping:
+      layout:
+      panes:
+        - ros2 launch as2_path_planning map_server.launch.py
+            namespace:=map_server
+            use_sim_time:=true
+            config_file:=sim_config/exploration.yaml
+        - ros2 launch as2_path_planning frontier_allocator.launch.py
+            use_sim_time:=true
+            config_file:=sim_config/exploration.yaml
+  - mission:
+      layout:
+      panes:
+        - echo Run here the mission

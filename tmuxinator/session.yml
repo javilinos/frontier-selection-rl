@@ -1,0 +1,64 @@
+<%
+# Input parameters
+drone_namespace     = @settings["drone_namespace"]
+simulation_config   = @settings["simulation_config"]
+
+# Other parameters
+behavior_type       = "position"
+
+%>
+attach: false
+root: ./
+startup_window: alphanumeric_viewer
+windows:
+  - alphanumeric_viewer:
+      layout: tiled
+      panes:
+        - ros2 run as2_alphanumeric_viewer as2_alphanumeric_viewer_node
+            --ros-args -r  __ns:=/<%= drone_namespace %>
+  - platform:
+      layout: tiled
+      panes:
+        - ros2 launch as2_platform_gazebo platform_gazebo_launch.py
+            namespace:=<%= drone_namespace %>
+            simulation_config_file:=<%= simulation_config %>
+            platform_config_file:=sim_config/config_file.yaml
+  - state_estimator:
+      layout:
+      panes:
+        - ros2 launch as2_state_estimator state_estimator_launch.py
+            namespace:=<%= drone_namespace %>
+            config_file:=sim_config/config_file.yaml
+  # - controller:
+  #     layout:
+  #     panes:
+  #       - ros2 launch as2_motion_controller controller_launch.py
+  #           namespace:=<%= drone_namespace %>
+  #           config_file:=sim_config/config_file.yaml
+  #           plugin_name:=pid_speed_controller
+  #           plugin_config_file:=sim_config/pid_speed_controller.yaml   
+  # - behaviors:
+  #     layout:
+  #     panes:
+  #       - ros2 launch as2_behaviors_motion motion_behaviors_launch.py
+  #           namespace:=<%= drone_namespace %>
+  #           config_file:=sim_config/config_file.yaml
+  - mapping:
+      layout:
+      panes:
+        - ros2 launch as2_path_planning laserscan_to_occupancy_grid.launch.py
+            namespace:=<%= drone_namespace %>
+            use_sim_time:=true
+            output_topic:=/map_server/input_occupancy_grid
+            config_file:=sim_config/exploration.yaml
+  - planner:
+      layout:
+      panes:
+        - ros2 launch as2_path_planning path_planner.launch.py
+            namespace:=<%= drone_namespace %>
+            use_sim_time:=true
+            config_file:=sim_config/exploration.yaml
+  - mission:
+      layout:
+      panes:
+        - echo Run here the mission

@@ -1,0 +1,26 @@
+# ~/.tmuxinator/project_crazyflie_basic.yml
+
+<%
+# Input parameters
+simulation_config = @settings["simulation_config"]
+display_rviz = @settings["display_rviz"] == "true"
+
+# Other parameters
+use_sim_time      = true
+%>
+
+attach: true
+root: ./
+startup_window: gazebo
+# on_project_exit: pkill -9 -f "gazebo"
+windows:
+  - gazebo:
+      layout:
+      panes:
+        - ros2 launch as2_gazebo_assets launch_simulation.py
+          use_sim_time:=<%= use_sim_time %>
+          simulation_config_file:=<%= simulation_config %>
+          headless:=false
+        <% if display_rviz %>
+        - rviz2 -d assets/rviz/two_drone.rviz
+        <% end %>

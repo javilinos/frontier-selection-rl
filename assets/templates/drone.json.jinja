@@ -1,0 +1,21 @@
+{
+    "world_name": "{{ world_name | default("empty") }}",
+    "drones": [
+    {%- for drone in drones %}
+        {
+            "model_type": "quadrotor_base",
+            "model_name": "{{ drone.model_name }}",
+            "xyz": {{ drone.xyz }},
+            "rpy": {{ drone.rpy }},
+            "flight_time": 60,
+            "payload": [
+                {
+                    "model_type": "planar_lidar",
+                    "model_name": "lidar",
+                    "xyz": [0, 0, -0.5]
+                }
+            ]
+        }{% if not loop.last %},{% endif %}
+    {% endfor -%}
+    ]
+}

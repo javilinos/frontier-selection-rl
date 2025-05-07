@@ -1,0 +1,8 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+# Install dependencies
+RUN python3 -m pip install -U stable-baselines3[extra]
+RUN python3 -m pip install -U transforms3d
+RUN python3 -m pip install -U gymnasium==0.29.1
+RUN python3 -m pip install -U numpy==1.23.5
