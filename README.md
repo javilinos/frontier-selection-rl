@@ -186,7 +186,7 @@ python3 rl/environments/as2_gymnasium_env_discrete_heuristics.py \
 
 ### License
 
-This project is distributed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is distributed under the BDS3 Clause License. See [LICENSE](LICENSE) for details.
 
 
 
