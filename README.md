@@ -2,34 +2,15 @@
 
 *Code accompanying the CORL 2025 paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
 
-<div align="center">
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/ours_low_density.png" alt="Ours Low Density" width="200" />
-    <figcaption>Ours (Low Density)</figcaption>
-  </figure>
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/ours_mid_density.png" alt="Ours Medium Density" width="200" />
-    <figcaption>Ours (Medium Density)</figcaption>
-  </figure>
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/ours_high_density.png" alt="Ours High Density" width="200" />
-    <figcaption>Ours (High Density)</figcaption>
-  </figure>
-</div>
-<div align="center" style="margin-bottom: 1em;">
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/nearest_low_density.png" alt="Nearest Low Density" width="200" />
-    <figcaption>Nearest Heuristic (Low Density)</figcaption>
-  </figure>
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/nearest_mid_density.png" alt="Nearest Medium Density" width="200" />
-    <figcaption>Nearest Heuristic (Medium Density)</figcaption>
-  </figure>
-  <figure style="display:inline-block; margin:1em; text-align:center;">
-    <img src="images/nearest_high_density.png" alt="Nearest High Density" width="200" />
-    <figcaption>Nearest Heuristic (High Density)</figcaption>
-  </figure>
-</div>
+|                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
+| :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
+| ![Ours Low Density](images/ours_low_density.png) <br> *Ours (Low Density)* | ![Ours Medium Density](images/ours_mid_density.png) <br> *Ours (Medium Density)* | ![Ours High Density](images/ours_high_density.png) <br> *Ours (High Density)* |
+
+|                                     Nearest (Low Density)                                     |                                       Nearest (Medium Density)                                      |                                      Nearest (High Density)                                      |
+| :-------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------: |
+| ![Nearest Low Density](images/nearest_low_density.png) <br> *Nearest Heuristic (Low Density)* | ![Nearest Medium Density](images/nearest_mid_density.png) <br> *Nearest Heuristic (Medium Density)* | ![Nearest High Density](images/nearest_high_density.png) <br> *Nearest Heuristic (High Density)* |
+
+---
 
 
 ---
