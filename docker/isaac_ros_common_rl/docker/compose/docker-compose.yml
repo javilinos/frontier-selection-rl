@@ -20,7 +20,7 @@ services:
       # git
       - ~/.gitconfig:/root/.gitconfig_local
       # working dirs
-      - ~/Desktop/as2_projects/project_rl:/root/project_rl
+      - ~/frontier-selection-rl:/root/frontier-selection-rl
     network_mode: "host"
     command: tail -f /dev/null
     working_dir: /root

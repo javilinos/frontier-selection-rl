@@ -246,7 +246,7 @@ def evaluate_policy(
         if render:
             env.render()
 
-    # plot_path(env.obstacles, path_to_plot)
+    plot_path(env.obstacles, path_to_plot)
 
     # accumulated_path = np.cumsum(env.cum_path_length)
     # episodes = list(range(1, n_eval_episodes + 1))

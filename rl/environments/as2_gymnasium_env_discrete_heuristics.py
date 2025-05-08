@@ -256,7 +256,6 @@ class AS2GymnasiumEnv(VecEnv):
             self.set_pose(drone.drone_id, frontier[0], frontier[1])
             self.activate_scan_srv.call(SetBool.Request(data=True))
             self.wait_for_map()
-            self.wait_for_map()
             frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                 idx)
             obs = self._get_obs(idx)
@@ -269,7 +268,6 @@ class AS2GymnasiumEnv(VecEnv):
             self.buf_dones[idx] = False
             self.total_path_length += self.path_length
             self.area_explored = discovered_area
-            print(self.area_explored)
             if len(frontiers) == 0:  # No frontiers left, episode ends
                 self.buf_dones[idx] = True
                 self.cum_path_length.append(self.total_path_length)
@@ -454,8 +452,8 @@ if __name__ == "__main__":
         help="Method to test on", choices=["nearest", "random", "hybrid", "tare"], required=True
     )
     parser.add_argument(
-        "--world_name", type=str, default="world_low_density",
-        help="World name to test on"
+        "--world_type", type=str, default="low_density",
+        help="World name to test on", choices=["low_density", "high_density", "enormous_density"]
     )
 
     parser.add_argument(
@@ -466,7 +464,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name=args.world_name, world_size=10.0,
+    env = AS2GymnasiumEnv(world_name=f"world_{args.world_type}", world_size=10.0,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="MultiInputPolicy", method=args.method)
     env.reset()
     num_episodes = args.num_episodes

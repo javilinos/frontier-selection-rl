@@ -246,7 +246,6 @@ class AS2GymnasiumEnv(VecEnv):
             if not result:
                 print("Failed to reach goal")
                 self.buf_dones[idx] = False
-                self.buf_rews[idx] = -1.0
                 self.wait_for_map()
                 frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                     idx)
@@ -259,11 +258,9 @@ class AS2GymnasiumEnv(VecEnv):
             else:
                 # old_map = np.copy(self.observation_manager.grid_matrix[0])
                 self.episode_path.append(nav_path)
-                # self.pause_physics()
                 self.activate_scan_srv.call(SetBool.Request(data=False))
                 self.set_pose(drone.drone_id, frontier[0], frontier[1])
                 self.activate_scan_srv.call(SetBool.Request(data=True))
-                # self.unpause_physics()
                 self.wait_for_map()
 
                 frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(

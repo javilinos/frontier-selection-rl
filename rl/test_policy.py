@@ -13,12 +13,7 @@ import rclpy
 from torch import nn
 from gymnasium import spaces
 import gymnasium as gym
-import sys
-import os
-# sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
-
-# from stable_baselines3 import PPO
-# from sb3_contrib.common.maskable.evaluation import evaluate_policy
+import argparse
 
 
 class CustomCallback(BaseCallback):
@@ -51,18 +46,27 @@ class Test:
         self.custom_callback = custom_callback
         self.model = PPO.load(path, self.env)
 
-    def test(self):
-        mean_reward, std_reward = evaluate_policy(self.model.policy, self.env, 10)
+    def test(self, num_episodes=10):
+        mean_reward, std_reward = evaluate_policy(self.model.policy, self.env, num_episodes)
         print(f"mean_reward:{mean_reward:.2f} +/- {std_reward:.2f}")
         self.env.drone_interface_list[0].shutdown()
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Test RL policy')
+    parser.add_argument(
+        "--world_type", type=str, default="low_density",
+        help="World name to test on", choices=["low_density", "medium_density", "high_density"]
+    )
+    parser.add_argument('--num_episodes', type=int, default=10, help='Size of the world')
+
+    args = parser.parse_args()
+
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name="world_low_density", world_size=10.0,
+    env = AS2GymnasiumEnv(world_name=f"world_{args.world_type}", world_size=10.0,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="CnnPolicy", testing=True)
     env = VecMonitor(env)
     custom_callback = CustomCallback()
-    test = Test(env, custom_callback, "ppo_as2_gymnasium.zip")
-    test.test()
+    test = Test(env, custom_callback, "trained_policy/ppo_as2_gymnasium.zip")
+    test.test(args.num_episodes)
     rclpy.shutdown()

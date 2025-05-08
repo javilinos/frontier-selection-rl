@@ -2,34 +2,34 @@
 
 usage() {
     echo "  options:"
-    echo "      -m: multi agent"
+    echo "      -s {low_density|medium_density|high_density}"
     echo "      -r: record rosbag"
-    echo "      -t: launch keyboard teleoperation"
 }
 
 # Arg parser
-while getopts "mrt" opt; do
-  case ${opt} in
-    m )
-      swarm="true"
+while getopts "s:r" opt; do
+  case "$opt" in
+    s)
+      case "$OPTARG" in
+        low_density|medium_density|high_density)
+          simulation_config="assets/worlds/world_${OPTARG}.json"
+          ;;
+        *)
+          echo "Error: invalid density '$OPTARG'" >&2
+          usage
+          ;;
+      esac
       ;;
-    r )
+    r)
       record_rosbag="true"
       ;;
-    t )
-      launch_keyboard_teleop="true"
-      ;;
-    \? )
-      echo "Invalid option: -$OPTARG" >&2
+    :)  # missing argument for -s
+      echo "Error: -$OPTARG requires a value" >&2
       usage
-      exit 1
       ;;
-    : )
-      if [[ ! $OPTARG =~ ^[wrt]$ ]]; then
-        echo "Option -$OPTARG requires an argument" >&2
-        usage
-        exit 1
-      fi
+    \?) # invalid option
+      echo "Error: invalid option -$OPTARG" >&2
+      usage
       ;;
   esac
 done
@@ -45,7 +45,7 @@ swarm=${swarm:="false"}
 record_rosbag=${record_rosbag:="false"}
 launch_keyboard_teleop=${launch_keyboard_teleop:="false"}
 
-simulation_config="assets/worlds/world_low_density.json" 
+# simulation_config="assets/worlds/world_low_density.json" 
 if [[ ${swarm} == "true" ]]; then
   simulation_config="assets/worlds/world3.json"
 fi
