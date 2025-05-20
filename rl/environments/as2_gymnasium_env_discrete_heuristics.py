@@ -453,7 +453,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--world_type", type=str, default="low_density",
-        help="World name to test on", choices=["low_density", "high_density", "enormous_density"]
+        help="World name to test on", choices=["low_density", "medium_density", "high_density"]
     )
 
     parser.add_argument(

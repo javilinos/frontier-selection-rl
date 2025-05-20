@@ -9,7 +9,7 @@ Panels:
         - /Path21
         - /Path31
       Splitter Ratio: 0.5058823823928833
-    Tree Height: 575
+    Tree Height: 596
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -99,132 +99,6 @@ Visualization Manager:
           Value: false
         drone0/rotor_3:
           Value: false
-        drone1:
-          Value: true
-        drone1/air_pressure:
-          Value: false
-        drone1/air_pressure/internal:
-          Value: false
-        drone1/air_pressure/internal/air_pressure:
-          Value: false
-        drone1/base_footprint:
-          Value: false
-        drone1/base_link:
-          Value: false
-        drone1/imu:
-          Value: false
-        drone1/imu/internal:
-          Value: false
-        drone1/imu/internal/imu:
-          Value: false
-        drone1/lidar:
-          Value: false
-        drone1/lidar/planar_lidar:
-          Value: false
-        drone1/lidar/planar_lidar/gpu_ray:
-          Value: false
-        drone1/magnetometer:
-          Value: false
-        drone1/magnetometer/internal:
-          Value: false
-        drone1/magnetometer/internal/magnetometer:
-          Value: false
-        drone1/map:
-          Value: false
-        drone1/odom:
-          Value: false
-        drone1/rotor_0:
-          Value: false
-        drone1/rotor_1:
-          Value: false
-        drone1/rotor_2:
-          Value: false
-        drone1/rotor_3:
-          Value: false
-        drone2:
-          Value: true
-        drone2/air_pressure:
-          Value: false
-        drone2/air_pressure/internal:
-          Value: false
-        drone2/air_pressure/internal/air_pressure:
-          Value: false
-        drone2/base_footprint:
-          Value: false
-        drone2/base_link:
-          Value: false
-        drone2/imu:
-          Value: false
-        drone2/imu/internal:
-          Value: false
-        drone2/imu/internal/imu:
-          Value: false
-        drone2/lidar:
-          Value: false
-        drone2/lidar/planar_lidar:
-          Value: false
-        drone2/lidar/planar_lidar/gpu_ray:
-          Value: false
-        drone2/magnetometer:
-          Value: false
-        drone2/magnetometer/internal:
-          Value: false
-        drone2/magnetometer/internal/magnetometer:
-          Value: false
-        drone2/map:
-          Value: false
-        drone2/odom:
-          Value: false
-        drone2/rotor_0:
-          Value: false
-        drone2/rotor_1:
-          Value: false
-        drone2/rotor_2:
-          Value: false
-        drone2/rotor_3:
-          Value: false
-        drone3:
-          Value: true
-        drone3/air_pressure:
-          Value: false
-        drone3/air_pressure/internal:
-          Value: false
-        drone3/air_pressure/internal/air_pressure:
-          Value: false
-        drone3/base_footprint:
-          Value: false
-        drone3/base_link:
-          Value: false
-        drone3/imu:
-          Value: false
-        drone3/imu/internal:
-          Value: false
-        drone3/imu/internal/imu:
-          Value: false
-        drone3/lidar:
-          Value: false
-        drone3/lidar/planar_lidar:
-          Value: false
-        drone3/lidar/planar_lidar/gpu_ray:
-          Value: false
-        drone3/magnetometer:
-          Value: false
-        drone3/magnetometer/internal:
-          Value: false
-        drone3/magnetometer/internal/magnetometer:
-          Value: false
-        drone3/map:
-          Value: false
-        drone3/odom:
-          Value: false
-        drone3/rotor_0:
-          Value: false
-        drone3/rotor_1:
-          Value: false
-        drone3/rotor_2:
-          Value: false
-        drone3/rotor_3:
-          Value: false
         earth:
           Value: true
       Marker Scale: 3
@@ -264,99 +138,6 @@ Visualization Manager:
                 drone0/rotor_3:
                   {}
               drone0/base_footprint:
-                {}
-          drone1/map:
-            drone1/odom:
-              drone1:
-                drone1/air_pressure:
-                  drone1/air_pressure/internal:
-                    drone1/air_pressure/internal/air_pressure:
-                      {}
-                drone1/base_link:
-                  {}
-                drone1/imu:
-                  drone1/imu/internal:
-                    drone1/imu/internal/imu:
-                      {}
-                drone1/lidar:
-                  drone1/lidar/planar_lidar:
-                    drone1/lidar/planar_lidar/gpu_ray:
-                      {}
-                drone1/magnetometer:
-                  drone1/magnetometer/internal:
-                    drone1/magnetometer/internal/magnetometer:
-                      {}
-                drone1/rotor_0:
-                  {}
-                drone1/rotor_1:
-                  {}
-                drone1/rotor_2:
-                  {}
-                drone1/rotor_3:
-                  {}
-              drone1/base_footprint:
-                {}
-          drone2/map:
-            drone2/odom:
-              drone2:
-                drone2/air_pressure:
-                  drone2/air_pressure/internal:
-                    drone2/air_pressure/internal/air_pressure:
-                      {}
-                drone2/base_link:
-                  {}
-                drone2/imu:
-                  drone2/imu/internal:
-                    drone2/imu/internal/imu:
-                      {}
-                drone2/lidar:
-                  drone2/lidar/planar_lidar:
-                    drone2/lidar/planar_lidar/gpu_ray:
-                      {}
-                drone2/magnetometer:
-                  drone2/magnetometer/internal:
-                    drone2/magnetometer/internal/magnetometer:
-                      {}
-                drone2/rotor_0:
-                  {}
-                drone2/rotor_1:
-                  {}
-                drone2/rotor_2:
-                  {}
-                drone2/rotor_3:
-                  {}
-              drone2/base_footprint:
-                {}
-          drone3/map:
-            drone3/odom:
-              drone3:
-                drone3/air_pressure:
-                  drone3/air_pressure/internal:
-                    drone3/air_pressure/internal/air_pressure:
-                      {}
-                drone3/base_link:
-                  {}
-                drone3/imu:
-                  drone3/imu/internal:
-                    drone3/imu/internal/imu:
-                      {}
-                drone3/lidar:
-                  drone3/lidar/planar_lidar:
-                    drone3/lidar/planar_lidar/gpu_ray:
-                      {}
-                drone3/magnetometer:
-                  drone3/magnetometer/internal:
-                    drone3/magnetometer/internal/magnetometer:
-                      {}
-                drone3/rotor_0:
-                  {}
-                drone3/rotor_1:
-                  {}
-                drone3/rotor_2:
-                  {}
-                drone3/rotor_3:
-                  {}
-              drone3/base_footprint:
                 {}
       Update Interval: 0
       Value: true
@@ -560,7 +341,7 @@ Visualization Manager:
       Enabled: true
       Name: Path
       Namespaces:
-        map_server: true
+        {}
       Topic:
         Depth: 100
         Durability Policy: Volatile
@@ -655,7 +436,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        frontier: true
+        {}
       Topic:
         Depth: 75
         Durability Policy: Volatile
@@ -720,7 +501,7 @@ Visualization Manager:
       Enabled: true
       Name: Path1
       Namespaces:
-        map_server: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -733,7 +514,7 @@ Visualization Manager:
       Enabled: true
       Name: Path2
       Namespaces:
-        map_server: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -746,7 +527,7 @@ Visualization Manager:
       Enabled: true
       Name: Path3
       Namespaces:
-        map_server: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -808,26 +589,26 @@ Visualization Manager:
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 7.63253116607666
-        Y: -0.9117200970649719
-        Z: -1.9077569246292114
+        X: 0.6035524606704712
+        Y: -1.6685833930969238
+        Z: -1.9147875308990479
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.5747970938682556
+      Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.1404027938842773
+      Yaw: 3.1454029083251953
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1024
+  Height: 1050
   Hide Left Dock: false
   Hide Right Dock: true
-  QMainWindow State: 000000ff00000000fd00000004000000000000015600000362fc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d000002c2000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000c00540065006c0065006f007001000003050000009a0000006e00ffffff000000010000010f000002b0fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d000002b0000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007800000003efc0100000002fb0000000800540069006d00650100000000000007800000027900fffffffb0000000800540069006d00650100000000000004500000000000000000000006240000036200000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000400000000000001560000037cfc0200000009fb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d000002d7000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb0000000c00540065006c0065006f0070010000031a0000009f0000006e00ffffff000000010000010f000002b0fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000003d000002b0000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007800000003efc0100000002fb0000000800540069006d00650100000000000007800000027900fffffffb0000000800540069006d00650100000000000004500000000000000000000006240000037c00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Teleop:
@@ -840,4 +621,4 @@ Window Geometry:
     collapsed: true
   Width: 1920
   X: 0
-  Y: 26
+  Y: 0
