@@ -2,7 +2,7 @@
 
 <sdf version="1.6">
     <world name="world_high_density">
-        <gravity>0 0 0</gravity>
+        <!-- <gravity>0 0 0</gravity> -->
         <physics name="4ms" type="ignored">
             <max_step_size>0.004</max_step_size>
             <real_time_factor>1.0</real_time_factor>

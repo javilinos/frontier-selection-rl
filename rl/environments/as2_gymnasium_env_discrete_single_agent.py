@@ -6,6 +6,7 @@ from as2_python_api.drone_interface_teleop import DroneInterfaceTeleop
 from as2_msgs.srv import SetPoseWithID
 from ros_gz_interfaces.srv import ControlWorld
 from geometry_msgs.msg import PoseStamped, Pose, PointStamped
+from nav_msgs.msg import Path
 from std_srvs.srv import SetBool, Empty
 
 import gymnasium as gym
@@ -52,6 +53,10 @@ class AS2GymnasiumEnv(VecEnv):
         self.clear_map_srv = self.drone_interface_list[0].create_client(
             Empty, "/map_server/clear_map"
         )
+
+        if testing:
+            self.rotate_srv = self.drone_interface_list[0].create_client(
+                SetBool, f"{self.drone_interface_list[0].get_namespace()}/rotate_in_place")
 
         self.render_mode = []
         for _ in range(num_envs):
@@ -103,7 +108,7 @@ class AS2GymnasiumEnv(VecEnv):
         pause_physics_res = self.world_control_client.call(pause_physics_req)
         return pause_physics_res.success
 
-    def set_random_pose(self, model_name) -> tuple[bool, Pose]:
+    def set_random_pose(self, model_name, z=1.0) -> tuple[bool, Pose]:
         set_model_pose_req = SetPoseWithID.Request()
         set_model_pose_req.pose.id = model_name
         x = round(random.uniform(-self.world_size, self.world_size), 2)
@@ -120,7 +125,7 @@ class AS2GymnasiumEnv(VecEnv):
 
         set_model_pose_req.pose.pose.position.x = x
         set_model_pose_req.pose.pose.position.y = y
-        set_model_pose_req.pose.pose.position.z = 1.0
+        set_model_pose_req.pose.pose.position.z = z
         yaw = round(random.uniform(0, 2 * math.pi), 2)
         quat = euler2quat(0, 0, yaw)
         set_model_pose_req.pose.pose.orientation.x = quat[1]
@@ -180,6 +185,24 @@ class AS2GymnasiumEnv(VecEnv):
         # Return success and position
         return set_model_pose_res.success, set_model_pose_req.pose.pose
 
+    def set_pose_with_motion(self, path):
+        path_to_follow = Path()
+        path_to_follow.header.frame_id = "earth"
+        for point in path:
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = "earth"
+            pose_stamped.pose.position.x = point[0]
+            pose_stamped.pose.position.y = point[1]
+            pose_stamped.pose.position.z = 1.0
+            pose_stamped.pose.orientation.x = 0.0
+            pose_stamped.pose.orientation.y = 0.0
+            pose_stamped.pose.orientation.z = 0.0
+            pose_stamped.pose.orientation.w = 1.0
+            path_to_follow.poses.append(pose_stamped)
+        self.drone_interface_list[0].follow_path.follow_path_with_keep_yaw(
+            path_to_follow, speed=1.0)
+        return
+
     def set_pose_with_cli(self, model_name, x, y):
 
         command = (
@@ -214,12 +237,23 @@ class AS2GymnasiumEnv(VecEnv):
         # self.pause_physics()
         print("Resetting drone", self.drone_interface_list[env_idx].drone_id)
         self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
-
+        time.sleep(1.0)
         # self.unpause_physics()
+        if self.testing:
+            print('Arm')
+            success = self.drone_interface_list[0].arm()
+            print(f'Arm success: {success}')
+            # Offboard
+            print('Offboard')
+            success = self.drone_interface_list[0].offboard()
+            print(f'Offboard success: {success}')
+            self.drone_interface_list[0].takeoff(1.0, 0.5)
         self.activate_scan_srv.call(SetBool.Request(data=True))
         self.clear_map_srv.call(Empty.Request())
         self.wait_for_map()
-
+        if self.testing:
+            self.rotate_srv.call(SetBool.Request(data=True))
+            self.wait_for_map()
         frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
             env_idx)
         self.area_explored = discovered_area
@@ -257,9 +291,13 @@ class AS2GymnasiumEnv(VecEnv):
                     break
             else:
                 # old_map = np.copy(self.observation_manager.grid_matrix[0])
-                self.episode_path.append(nav_path)
+                # self.episode_path.append(nav_path)
                 self.activate_scan_srv.call(SetBool.Request(data=False))
-                self.set_pose(drone.drone_id, frontier[0], frontier[1])
+                if self.testing:
+                    self.set_pose_with_motion(nav_path)
+                    self.rotate_srv.call(SetBool.Request(data=True))
+                else:
+                    self.set_pose(drone.drone_id, frontier[0], frontier[1])
                 self.activate_scan_srv.call(SetBool.Request(data=True))
                 self.wait_for_map()
 
@@ -268,7 +306,7 @@ class AS2GymnasiumEnv(VecEnv):
 
                 obs = self._get_obs(idx)
                 self._save_obs(idx, obs)
-                self.buf_infos[idx] = {}  # TODO: Add info
+                self.buf_infos[idx] = {"nav_path": nav_path}
 
                 max_distance = math.sqrt((self.world_size * 2)**2 + (self.world_size * 2)**2)
 

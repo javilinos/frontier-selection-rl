@@ -27,14 +27,14 @@
                 </inertia>
             </inertial>
 
-            <!-- <collision name="collision">
+            <collision name="collision">
                 <geometry>
                     <cylinder>
                         <radius>0.25</radius>
                         <length>5.0</length>
                     </cylinder>
                 </geometry>
-            </collision> -->
+            </collision>
         </link>
         <!-- <frame name="mount_point"/> -->
 

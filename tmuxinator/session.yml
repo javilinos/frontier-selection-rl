@@ -29,20 +29,20 @@ windows:
         - ros2 launch as2_state_estimator state_estimator_launch.py
             namespace:=<%= drone_namespace %>
             config_file:=sim_config/config_file.yaml
-  # - controller:
-  #     layout:
-  #     panes:
-  #       - ros2 launch as2_motion_controller controller_launch.py
-  #           namespace:=<%= drone_namespace %>
-  #           config_file:=sim_config/config_file.yaml
-  #           plugin_name:=pid_speed_controller
-  #           plugin_config_file:=sim_config/pid_speed_controller.yaml   
-  # - behaviors:
-  #     layout:
-  #     panes:
-  #       - ros2 launch as2_behaviors_motion motion_behaviors_launch.py
-  #           namespace:=<%= drone_namespace %>
-  #           config_file:=sim_config/config_file.yaml
+  - controller:
+      layout:
+      panes:
+        - ros2 launch as2_motion_controller controller_launch.py
+            namespace:=<%= drone_namespace %>
+            config_file:=sim_config/config_file.yaml
+            plugin_name:=pid_speed_controller
+            plugin_config_file:=sim_config/pid_speed_controller.yaml   
+  - behaviors:
+      layout:
+      panes:
+        - ros2 launch as2_behaviors_motion motion_behaviors_launch.py
+            namespace:=<%= drone_namespace %>
+            config_file:=sim_config/config_file.yaml
   - mapping:
       layout:
       panes:
@@ -58,6 +58,9 @@ windows:
             namespace:=<%= drone_namespace %>
             use_sim_time:=true
             config_file:=sim_config/exploration.yaml
+        - ros2 launch as2_path_planning explorer.launch.py
+            namespace:=<%= drone_namespace %>
+            use_sim_time:=true
   - mission:
       layout:
       panes:
