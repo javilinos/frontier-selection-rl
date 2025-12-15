@@ -2,18 +2,10 @@
     "world_name": "world_low_density",
     "drones": [
         {
-            "model_type": "quadrotor_base",
+            "model_type": "quadrotor_multi_ranger",
             "model_name": "drone0",
             "xyz": [0.81, 2.11, 0],
-            "rpy": [0, 0, 0.37],
-            "flight_time": 60,
-            "payload": [
-                {
-                    "model_type": "planar_lidar",
-                    "model_name": "lidar",
-                    "xyz": [0, 0, -0.5]
-                }
-            ]
+            "rpy": [0, 0, 0.37]
         }
     ]
 }

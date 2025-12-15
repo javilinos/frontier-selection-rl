@@ -39,6 +39,8 @@ shift $((OPTIND -1))
 
 export GZ_SIM_RESOURCE_PATH=$PWD/assets/worlds:$PWD/assets/models:$GZ_SIM_RESOURCE_PATH
 
+export AS2_EXTRA_DRONE_MODELS=quadrotor_multi_ranger:$AS2_EXTRA_DRONE_MODELS
+
 ## DEFAULTS
 display_rviz=true
 swarm=${swarm:="false"}

@@ -23,6 +23,9 @@ windows:
             namespace:=<%= drone_namespace %>
             simulation_config_file:=<%= simulation_config %>
             platform_config_file:=sim_config/config_file.yaml
+        - ros2 run ros_gz_bridge parameter_bridge --ros-args 
+            -r __ns:=/<%= drone_namespace %> 
+            -p config_file:=sim_config/bridges.yaml
   - state_estimator:
       layout:
       panes:
