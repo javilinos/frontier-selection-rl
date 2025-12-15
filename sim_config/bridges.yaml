@@ -1,0 +1,13 @@
+
+# Payload plugin
+- ros_topic_name: "sensor_measurements/lidar/scan"
+  gz_topic_name: "/world/world_low_density/model/drone0/model/lidar/link/multi_ranger/sensor/gpu_ray/scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "sensor_measurements/lidar/points"
+  gz_topic_name: "/world/world_low_density/model/drone0/model/lidar/link/multi_ranger/sensor/gpu_ray/scan/points"
+  ros_type_name: "sensor_msgs/msg/PointCloud2"
+  gz_type_name: "gz.msgs.PointCloudPacked"
+  direction: GZ_TO_ROS
