@@ -1,0 +1,70 @@
+# ~/.tmuxinator/project_crazyflie_basic.yml
+
+<%
+# Input parameters
+drones              = @settings["drones"]
+
+%>
+attach: false
+root: ./
+startup_window: alphanumeric_viewer
+windows:
+  - platform:
+      panes:
+        - ros2 launch as2_platform_crazyflie crazyflie_swarm_launch.py
+            swarm_config_file:=cf_config/config.yml
+  - brf:
+      layout: even-vertical
+      panes:
+    <%- drones.split(':').each do |drone| %>
+        - ros2 launch as2_state_estimator state_estimator_launch.py
+            namespace:=<%= drone %>
+            config_file:=cf_config/config.yml
+        - ros2 launch as2_motion_controller controller_launch.py
+            namespace:=<%= drone %>
+            config_file:=cf_config/config.yml
+            plugin_name:=pid_speed_controller
+            plugin_config_file:=cf_config/pid_speed_controller.yml
+    <%- end %>
+  - behaviors:
+      layout: even-vertical
+      panes:
+    <%- drones.split(':').each do |drone| %>
+        - ros2 launch as2_behaviors_motion motion_behaviors_launch.py
+            namespace:=<%= drone %>
+            config_file:=cf_config/config.yml
+        - ros2 launch as2_behaviors_trajectory_generation generate_polynomial_trajectory_behavior_launch.py
+            namespace:=<%= drone %>
+            config_file:=cf_config/config.yml
+    <%- end %>
+  - planner:
+      layout: even-vertical
+      panes:
+    <%- drones.split(':').each do |drone| %>
+        - ros2 launch as2_path_planning laserscan_to_occupancy_grid.launch.py
+            namespace:=<%= drone %>
+            use_sim_time:=false
+            config_file:=cf_config/exploration.yml
+            output_topic:=/map_server/input_occupancy_grid
+        - ros2 launch as2_path_planning path_planner.launch.py
+            namespace:=<%= drone %>
+            use_sim_time:=false
+            config_file:=cf_config/exploration.yml
+        - ros2 launch as2_path_planning explorer.launch.py
+            namespace:=<%= drone %>
+            use_sim_time:=false
+            config_file:=cf_config/exploration.yml
+    <%- end %>
+  - mapping:
+      layout:
+      panes:
+        - ros2 launch as2_path_planning map_server.launch.py
+            namespace:=map_server
+            use_sim_time:=true
+            config_file:=cf_config/exploration.yml
+        - ros2 launch as2_path_planning frontier_allocator.launch.py
+            use_sim_time:=true
+            config_file:=cf_config/exploration.yml
+  - mission:
+      panes:
+        - 
