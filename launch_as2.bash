@@ -47,12 +47,7 @@ swarm=${swarm:="false"}
 record_rosbag=${record_rosbag:="false"}
 launch_keyboard_teleop=${launch_keyboard_teleop:="false"}
 
-# simulation_config="assets/worlds/world_low_density.json" 
-if [[ ${swarm} == "true" ]]; then
-  simulation_config="assets/worlds/world3.json"
-fi
-
-drones=($(python3 utils/get_drones.py ${simulation_config} --sep ' '))
+drones=($(python3 utils/get_drones.py -p ${simulation_config} --sep ' '))
 echo drones: ${drones[@]}
 for drone in "${drones[@]}"; do
   echo "Starting tmuxinator session for drone: ${drone}"
