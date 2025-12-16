@@ -13,6 +13,7 @@
       # Motion Capture
       external_odom: true
       external_odom_topic: "self_localization/pose"
+      multi_ranger_deck: true  # Availability of multi ranger deck
 
   # State Estimator
   state_estimator:
