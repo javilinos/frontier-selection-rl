@@ -53,7 +53,7 @@
 cf0:
   platform:
     ros__parameters:
-      uri: radio://0/80/2M/E7E7E70000
+      uri: radio://0/80/2M/E7E7E7EEEE
   # Motion Capture
   state_estimator:
     ros__parameters:

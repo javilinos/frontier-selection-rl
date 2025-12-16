@@ -36,7 +36,7 @@ class AS2GymnasiumEnv(VecEnv):
     def __init__(self, world_name, world_size, grid_size, min_distance, num_envs, policy_type: str, testing: bool = False) -> None:
         # ROS 2 related stuff
         self.drone_interface_list = [
-            DroneInterfaceTeleop(drone_id=f"drone{n}", use_sim_time=True)
+            DroneInterfaceTeleop(drone_id=f"drone{n}", use_sim_time=False)
             for n in range(num_envs)
         ]
         self.set_pose_client = self.drone_interface_list[0].create_client(
@@ -232,11 +232,11 @@ class AS2GymnasiumEnv(VecEnv):
     def reset_single_env(self, env_idx):
         self.total_path_length = 0
         self.area_explored = 0
-        self.obstacles = self.randomize_scenario()
+        # self.obstacles = self.randomize_scenario()
         self.activate_scan_srv.call(SetBool.Request(data=False))
         # self.pause_physics()
         print("Resetting drone", self.drone_interface_list[env_idx].drone_id)
-        self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
+        # self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
         time.sleep(1.0)
         # self.unpause_physics()
         if self.testing:
@@ -287,7 +287,8 @@ class AS2GymnasiumEnv(VecEnv):
                     self.buf_dones[idx] = True
                     self.area_explored = discovered_area
                     # self.buf_rews[idx] = 10.0
-                    self.reset_single_env(idx)
+                    # self.reset_single_env(idx)
+                    self.drone_interface_list[0].land()
                     break
             else:
                 # old_map = np.copy(self.observation_manager.grid_matrix[0])
@@ -295,11 +296,13 @@ class AS2GymnasiumEnv(VecEnv):
                 self.activate_scan_srv.call(SetBool.Request(data=False))
                 if self.testing:
                     self.set_pose_with_motion(nav_path)
+                    self.activate_scan_srv.call(SetBool.Request(data=True))
+                    self.wait_for_map()
                     self.rotate_srv.call(SetBool.Request(data=True))
                 else:
                     self.set_pose(drone.drone_id, frontier[0], frontier[1])
-                self.activate_scan_srv.call(SetBool.Request(data=True))
-                self.wait_for_map()
+                    self.activate_scan_srv.call(SetBool.Request(data=True))
+                    self.wait_for_map()
 
                 frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                     idx)

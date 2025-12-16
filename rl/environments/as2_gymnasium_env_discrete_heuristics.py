@@ -7,6 +7,7 @@ from as2_msgs.srv import SetPoseWithID
 from ros_gz_interfaces.srv import ControlWorld
 from geometry_msgs.msg import PoseStamped, Pose, PointStamped
 from std_srvs.srv import SetBool, Empty
+from nav_msgs.msg import Path
 
 import gymnasium as gym
 from gymnasium.spaces import Discrete
@@ -35,10 +36,10 @@ from action.heuristic_action import NearestFrontierAction, HybridAction, RandomA
 
 class AS2GymnasiumEnv(VecEnv):
 
-    def __init__(self, world_name, world_size, grid_size, min_distance, num_envs, policy_type: str, method: str) -> None:
+    def __init__(self, world_name, world_size, grid_size, min_distance, num_envs, policy_type: str, method: str, testing: bool) -> None:
         # ROS 2 related stuff
         self.drone_interface_list = [
-            DroneInterfaceTeleop(drone_id=f"drone{n}", use_sim_time=True)
+            DroneInterfaceTeleop(drone_id=f"drone{n}", use_sim_time=False)
             for n in range(num_envs)
         ]
         self.set_pose_client = self.drone_interface_list[0].create_client(
@@ -56,6 +57,10 @@ class AS2GymnasiumEnv(VecEnv):
         self.clear_map_srv = self.drone_interface_list[0].create_client(
             Empty, "/map_server/clear_map"
         )
+
+        if testing:
+            self.rotate_srv = self.drone_interface_list[0].create_client(
+                SetBool, f"{self.drone_interface_list[0].get_namespace()}/rotate_in_place")
 
         self.render_mode = []
         for _ in range(num_envs):
@@ -97,6 +102,7 @@ class AS2GymnasiumEnv(VecEnv):
         self.buf_rews = np.zeros((self.num_envs,), dtype=np.float32)
         self.buf_infos = [{} for _ in range(self.num_envs)]
         self.actions = None
+        self.testing = testing
         # Make a drone interface with functionality to control the internal state of the drone with rl env methods
 
         # Other stuff
@@ -163,6 +169,24 @@ class AS2GymnasiumEnv(VecEnv):
         # Return success and position
         return set_model_pose_res.success, set_model_pose_req.pose.pose
 
+    def set_pose_with_motion(self, path):
+        path_to_follow = Path()
+        path_to_follow.header.frame_id = "earth"
+        for point in path:
+            pose_stamped = PoseStamped()
+            pose_stamped.header.frame_id = "earth"
+            pose_stamped.pose.position.x = point[0]
+            pose_stamped.pose.position.y = point[1]
+            pose_stamped.pose.position.z = 1.0
+            pose_stamped.pose.orientation.x = 0.0
+            pose_stamped.pose.orientation.y = 0.0
+            pose_stamped.pose.orientation.z = 0.0
+            pose_stamped.pose.orientation.w = 1.0
+            path_to_follow.poses.append(pose_stamped)
+        self.drone_interface_list[0].follow_path.follow_path_with_keep_yaw(
+            path_to_follow, speed=1.0)
+        return
+
     def set_pose_with_cli(self, model_name, x, y):
 
         command = (
@@ -193,17 +217,29 @@ class AS2GymnasiumEnv(VecEnv):
         self.total_path_length = 0
         self.area_explored = 0
         self.activate_scan_srv.call(SetBool.Request(data=False))
-        self.pause_physics()
+        # self.pause_physics()
         self.clear_map_srv.call(Empty.Request())
-        self.obstacles = self.randomize_scenario()
+        # self.obstacles = self.randomize_scenario()
         print("Resetting drone", self.drone_interface_list[env_idx].drone_id)
-        self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
+        # self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
         # self.set_pose(self.drone_interface_list[env_idx].drone_id, 0.0, 0.0)
-        self.unpause_physics()
+        if self.testing:
+            print('Arm')
+            success = self.drone_interface_list[0].arm()
+            print(f'Arm success: {success}')
+            # Offboard
+            print('Offboard')
+            success = self.drone_interface_list[0].offboard()
+            print(f'Offboard success: {success}')
+            self.drone_interface_list[0].takeoff(1.0, 0.5)
+        # self.unpause_physics()
         self.clear_map_srv.call(Empty.Request())
         time.sleep(1.0)
         self.activate_scan_srv.call(SetBool.Request(data=True))
         self.wait_for_map()
+        if self.testing:
+            self.rotate_srv.call(SetBool.Request(data=True))
+            self.wait_for_map()
         # self.observation_manager.call_get_frontiers_with_msg(env_id=env_idx)
         # while self.observation_manager.wait_for_frontiers == 0:
         #     pass
@@ -248,14 +284,24 @@ class AS2GymnasiumEnv(VecEnv):
                     self.cum_path_length.append(self.total_path_length)
                     self.area_explored = discovered_area
                     # self.buf_rews[idx] = 10.0
-                    self.reset_single_env(idx)
+                    # self.reset_single_env(idx)
+                    self.drone_interface_list[0].land()
                     break
 
             self.episode_path.append(nav_path)
             self.activate_scan_srv.call(SetBool.Request(data=False))
             self.set_pose(drone.drone_id, frontier[0], frontier[1])
-            self.activate_scan_srv.call(SetBool.Request(data=True))
+            # self.activate_scan_srv.call(SetBool.Request(data=True))
             self.wait_for_map()
+            if self.testing:
+                self.set_pose_with_motion(nav_path)
+                self.activate_scan_srv.call(SetBool.Request(data=True))
+                self.wait_for_map()
+                self.rotate_srv.call(SetBool.Request(data=True))
+            else:
+                self.set_pose(drone.drone_id, frontier[0], frontier[1])
+                self.activate_scan_srv.call(SetBool.Request(data=True))
+                self.wait_for_map()
             frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                 idx)
             obs = self._get_obs(idx)
@@ -465,7 +511,7 @@ if __name__ == "__main__":
 
     rclpy.init()
     env = AS2GymnasiumEnv(world_name=f"world_{args.world_type}", world_size=10.0,
-                          grid_size=200, min_distance=1.0, num_envs=1, policy_type="MultiInputPolicy", method=args.method)
+                          grid_size=200, min_distance=1.0, num_envs=1, policy_type="MultiInputPolicy", method=args.method, testing=True)
     env.reset()
     num_episodes = args.num_episodes
     episodes = list(range(1, num_episodes + 1))
@@ -527,8 +573,8 @@ if __name__ == "__main__":
         'path_length': path_length_per_episode
     })
 
-    # df.to_csv('csv/time_graphics_10_episodes/nearest.csv', index=False)
-    # df2.to_csv('csv/bars_graphic_cum_mean_path_length/enormous_density/nearest.csv', index=False)
+    df.to_csv('csv/time_graphics_one_episode/nearest_real.csv', index=False)
+    df2.to_csv('csv/bars_graphic_cum_mean_path_length/real/nearest_real.csv', index=False)
 
     # # Optional: plot the data
     fig, ax = plt.subplots()

@@ -114,9 +114,9 @@ class Training:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Perform training of the model")
-    parser.add_argument("--n_steps", type=int, default=512,
+    parser.add_argument("--n_steps", type=int, default=128,
                         help="Number of steps in the environment")
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--n_epochs", type=int, default=5, help="Number of epochs")
     parser.add_argument("--learning_rate", type=float, default=0.0003, help="Learning rate")
     parser.add_argument("--pi_net_arch", type=list,
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name="world2", world_size=10.0,
+    env = AS2GymnasiumEnv(world_name="world_high_density", world_size=10.0,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="CnnPolicy", testing=False)
     #
     env = VecMonitor(env)

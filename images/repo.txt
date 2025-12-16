@@ -1,0 +1,3 @@
+This repo contains all the code and supplementary material for “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.” paper.
+
+link: https://github.com/javilinos/frontier-selection-rl
