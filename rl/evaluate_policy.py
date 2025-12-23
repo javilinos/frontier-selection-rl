@@ -187,8 +187,8 @@ def evaluate_policy(
         features_list = []
         for frontier_feature in last_frontier_features:
             features_list.append(obs_as_tensor(
-                frontier_feature, "cuda").unsqueeze(0))  # Frontier features
-        obs_tensor = obs_as_tensor(observations, "cuda")  # Image
+                frontier_feature, "cpu").unsqueeze(0))  # Frontier features
+        obs_tensor = obs_as_tensor(observations, "cpu")  # Image
         actions = model._predict(
             obs_tensor,  # type: ignore[arg-type]
             features_list,
@@ -269,8 +269,10 @@ def evaluate_policy(
         'path_length': path_length_per_episode
     })
 
-    df.to_csv('csv/time_graphics_one_episode/ours_real.csv', index=False)
-    df2.to_csv('csv/bars_graphic_cum_mean_path_length/real/ours_real.csv', index=False)
+    datetime_str = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+    df.to_csv(f'csv/time_graphics_one_episode/ours_real_{datetime_str}.csv', index=False)
+    df2.to_csv(
+        f'csv/bars_graphic_cum_mean_path_length/real/ours_real_{datetime_str}.csv', index=False)
 
     # # Optional: plot the data
     fig, ax = plt.subplots()
@@ -292,8 +294,9 @@ def evaluate_policy(
     ax.set_title('Mean Area Explored with Standard Deviation')
     ax.legend()
 
-    plt.show()
+    # plt.show()
 
+    env.drone_interface_list[0].land()
     env.drone_interface_list[0].shutdown()
     # Save to CSV
     # df = pd.DataFrame({

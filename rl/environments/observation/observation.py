@@ -646,7 +646,9 @@ class MultiChannelImageObservationWithFrontierFeatures:
         if self.wait_for_map == 1:
             return
         # Initialize the matrix with zeros
-        matrix = np.array(msg.data, dtype=np.float32).reshape((self.grid_size, self.grid_size))
+        matrix = np.array(msg.data, dtype=np.float32).reshape((50, 50))
+        matrix = cv2.resize(matrix, (self.grid_size, self.grid_size),
+                            interpolation=cv2.INTER_NEAREST)
         matrix = matrix.swapaxes(0, 1)
         matrix = np.rot90(matrix, k=1, axes=(0, 1))
         matrix = np.rot90(matrix, k=1, axes=(0, 1))

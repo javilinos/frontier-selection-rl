@@ -247,18 +247,24 @@ class AS2GymnasiumEnv(VecEnv):
             print('Offboard')
             success = self.drone_interface_list[0].offboard()
             print(f'Offboard success: {success}')
-            self.drone_interface_list[0].takeoff(1.0, 0.5)
+            success = self.drone_interface_list[0].takeoff(1.0, 0.5)
+            print(f'takeoff success: {success}')
+        print(f'activting scan')
         self.activate_scan_srv.call(SetBool.Request(data=True))
+        print(f'clearing map')
         self.clear_map_srv.call(Empty.Request())
+        print(f'waiting for map')
         self.wait_for_map()
         if self.testing:
+            print(f'rotating')
             self.rotate_srv.call(SetBool.Request(data=True))
             self.wait_for_map()
         frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
             env_idx)
         self.area_explored = discovered_area
         if len(frontiers) == 0:
-            return self.reset_single_env(env_idx)
+            self.drone_interface_list[0].land()
+            # return self.reset_single_env(env_idx)
         obs = self._get_obs(env_idx)
         self._save_obs(env_idx, obs)
         return obs
@@ -322,7 +328,8 @@ class AS2GymnasiumEnv(VecEnv):
                     self.buf_dones[idx] = True
                     self.cum_path_length.append(self.total_path_length)
                     if not self.testing:
-                        self.reset_single_env(idx)
+                        # self.reset_single_env(idx)
+                        self.drone_interface_list[0].land()
 
         return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
 
@@ -414,7 +421,7 @@ class AS2GymnasiumEnv(VecEnv):
 
 if __name__ == "__main__":
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name="world_low_density", world_size=10.0,
+    env = AS2GymnasiumEnv(world_name="world_low_density", world_size=3.0,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="MultiInputPolicy")
     env.reset()
     env.wait_for_map()
