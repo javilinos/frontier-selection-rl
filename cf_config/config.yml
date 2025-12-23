@@ -51,7 +51,7 @@
       # follow_path_plugin_name: "follow_path_plugin_trajectory"
 
 # Specific Parameters for each drone
-cf0:
+drone0:
   platform:
     ros__parameters:
       uri: radio://0/80/2M/E7E7E7EEEE

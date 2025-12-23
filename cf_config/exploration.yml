@@ -7,7 +7,7 @@
         map_resolution: 0.1
         map_width: 50
         map_height: 50
-        max_range_limit: 1.5
+        max_range_limit: 1.0
 
         # PathPlanner parameters
         use_path_optimizer: false
@@ -22,8 +22,8 @@
         spin_speed: 0.01
 
         # FrontierAllocator parameters
-        frontier_min_area: 15
-        frontier_max_area: 35
+        frontier_min_area: 8
+        frontier_max_area: 20
         # safety_distance: 0.25
 
         # Safeguard
