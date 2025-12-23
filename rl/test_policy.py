@@ -44,7 +44,7 @@ class Test:
     def __init__(self, env: AS2GymnasiumEnv, custom_callback: CustomCallback, path: str):
         self.env = env
         self.custom_callback = custom_callback
-        self.model = PPO.load(path, self.env)
+        self.model = PPO.load(path, self.env, device='cpu')
 
     def test(self, num_episodes=10):
         mean_reward, std_reward = evaluate_policy(self.model.policy, self.env, num_episodes)
@@ -58,12 +58,12 @@ if __name__ == '__main__':
         "--world_type", type=str, default="low_density",
         help="World name to test on", choices=["low_density", "medium_density", "high_density"]
     )
-    parser.add_argument('--num_episodes', type=int, default=10, help='Size of the world')
+    parser.add_argument('--num_episodes', type=int, default=1, help='Size of the world')
 
     args = parser.parse_args()
 
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name=f"world_{args.world_type}", world_size=10.0,
+    env = AS2GymnasiumEnv(world_name=f"world_{args.world_type}", world_size=2.5,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="CnnPolicy", testing=True)
     env = VecMonitor(env)
     custom_callback = CustomCallback()
