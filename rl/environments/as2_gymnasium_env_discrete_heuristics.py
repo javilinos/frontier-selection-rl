@@ -247,7 +247,8 @@ class AS2GymnasiumEnv(VecEnv):
             env_idx)
         self.area_explored = discovered_area
         if len(frontiers) == 0:
-            return self.reset_single_env(env_idx)
+            self.drone_interface_list[0].land()
+            # return self.reset_single_env(env_idx)
         obs = self._get_obs(env_idx)
         self._save_obs(env_idx, obs)
         self.reset_counter = 0
@@ -290,7 +291,7 @@ class AS2GymnasiumEnv(VecEnv):
 
             self.episode_path.append(nav_path)
             self.activate_scan_srv.call(SetBool.Request(data=False))
-            self.set_pose(drone.drone_id, frontier[0], frontier[1])
+            # self.set_pose(drone.drone_id, frontier[0], frontier[1])
             # self.activate_scan_srv.call(SetBool.Request(data=True))
             self.wait_for_map()
             if self.testing:
@@ -490,7 +491,7 @@ def plot_path(obstacles, paths):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Perform testing of heuristic methods")
     parser.add_argument(
-        "--num_episodes", type=int, default=10,
+        "--num_episodes", type=int, default=1,
         help="Number of episodes to test on"
     )
     parser.add_argument(
@@ -572,9 +573,10 @@ if __name__ == "__main__":
         'episode': episodes,
         'path_length': path_length_per_episode
     })
-
-    df.to_csv('csv/time_graphics_one_episode/nearest_real.csv', index=False)
-    df2.to_csv('csv/bars_graphic_cum_mean_path_length/real/nearest_real.csv', index=False)
+    datetime_str = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+    df.to_csv(f'csv/time_graphics_one_episode/nearest_real_{datetime_str}.csv', index=False)
+    df2.to_csv(
+        f'csv/bars_graphic_cum_mean_path_length/real/nearest_real_{datetime_str}.csv', index=False)
 
     # # Optional: plot the data
     fig, ax = plt.subplots()
@@ -596,7 +598,8 @@ if __name__ == "__main__":
     ax.set_title('Mean Area Explored with Standard Deviation')
     ax.legend()
 
-    plt.show()
+    # plt.show()
+    env.drone_interface_list[0].land()
 
     env.drone_interface_list[0].shutdown()
     rclpy.shutdown()
