@@ -20,7 +20,6 @@ windows:
         - ros2 run as2_alphanumeric_viewer as2_alphanumeric_viewer_node
             --ros-args -r  __ns:=/<%= drone %>
     <%- end %>
-        - echo Run here the mission
 
   # Ground station
   - ground_station:
@@ -31,17 +30,14 @@ windows:
             namespace:=<%= drone_namespace %>
       <%- end %>
       <%- if rviz %>
-        - ros2 launch as2_visualization swarm_viz.launch.py
-            namespace_list:=<%= drone_namespace %>
-            rviz_config:=config_ground_station/rviz2_config.rviz
-            drone_model:=crazyflie
+        - rviz2
       <%- end %>
       <%- if rosbag %>
-        - ./rosbag/record_rosbag.bash <%= drone_namespace %>
+        - ros2 bag record -a
       <%- end %>
       <%- if mocap4ros2 %>
         - ros2 launch mocap4r2_optitrack_driver optitrack2.launch.py
             namespace:=mocap
-            config_file:=config_ground_station/mocap4r2_optitrack.yaml
+            config_file:=cf_config/mocap4r2_optitrack.yml
         - sleep 1; ros2 lifecycle set /mocap/mocap4r2_optitrack_driver_node activate
       <%- end %>
