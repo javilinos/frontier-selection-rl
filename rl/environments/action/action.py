@@ -17,8 +17,30 @@ class PathActionClient:
             f"{drone_interface.get_namespace()}/navigate_to_point",
         )
         self.drone_interface = drone_interface
+        self._last_server_check = 0.0
+        self._check_interval_s = 30.0
+
+    def _log_action_server_publishers(self) -> None:
+        now = time.time()
+        if (now - self._last_server_check) < self._check_interval_s:
+            return
+        self._last_server_check = now
+        try:
+            namespace = self.drone_interface.get_namespace()
+            status_topic = f"{namespace}/navigate_to_point/_action/status"
+            publishers = self.drone_interface.get_publishers_info_by_topic(status_topic)
+            count = len(publishers)
+            if count > 1:
+                print(f"[WARN] Multiple action servers detected for {status_topic}: {count}")
+                for pub in publishers:
+                    print(
+                        f"[WARN]  - node={pub.node_name} ns={pub.node_namespace} qos={pub.qos_profile}"
+                    )
+        except Exception as exc:
+            print(f"[WARN] Action server check failed: {exc}")
 
     def send_goal(self, point: list[float, float]):
+        self._log_action_server_publishers()
         goal_msg = NavigateToPoint.Goal()
         goal_msg.point.point.x = point[0]
         goal_msg.point.point.y = point[1]
@@ -263,7 +285,7 @@ class DiscreteFrontierIndexAction:  # To be used with MaskablePPO
         return np.sum(np.linalg.norm(points[1:] - points[:-1], axis=1))
 
 
-class DiscreteCoordinateAction:  # To be used with MaskablePPO
+class DiscreteFrontierIndexAction:  # To be used with MaskablePPO
     def __init__(self, drone_interface_list, grid_size):
         self.dims = [grid_size, grid_size]
         self.action_space = Discrete(grid_size * grid_size)
@@ -289,7 +311,7 @@ class DiscreteCoordinateAction:  # To be used with MaskablePPO
         pose_0 = (desp - grid_position[1]) / 10.0  # This recovers pose[0]
         return [pose_0, pose_1]
 
-    def take_action(self, frontier_list, grid_frontier_list: list[list[int]], env_id) -> tuple:
+    def take_action(self, frontier_list, env_id) -> tuple:
         action = self.actions[env_id]
         # action_coord = np.array([action % self.grid_size, action // self.grid_size])
         # action = self.convert_grid_position_to_pose(action_coord)
@@ -305,6 +327,7 @@ class DiscreteCoordinateAction:  # To be used with MaskablePPO
             path_length = self.path_length(nav_path)
 
         return frontier, path_length, result, nav_path
+        
 
     def generate_random_action(self):
         return [random.randint(0, self.grid_size - 1), random.randint(0, self.grid_size - 1)]

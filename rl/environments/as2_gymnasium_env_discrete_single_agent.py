@@ -26,7 +26,7 @@ from copy import deepcopy
 import xml.etree.ElementTree as ET
 
 from .observation.observation import MultiChannelImageObservationWithFrontierFeatures as Observation
-from .action.action import DiscreteCoordinateAction as Action
+from .action.action import DiscreteFrontierIndexAction as Action
 # from frontiers import get_frontiers, paint_frontiers
 
 
@@ -210,15 +210,16 @@ class AS2GymnasiumEnv(VecEnv):
         self.total_path_length = 0
         self.area_explored = 0
         self.obstacles = self.randomize_scenario()
-        self.activate_scan_srv.call(SetBool.Request(data=False))
         # self.pause_physics()
         print("Resetting drone", self.drone_interface_list[env_idx].drone_id)
         self.set_random_pose(self.drone_interface_list[env_idx].drone_id)
+        self.activate_scan_srv.call(SetBool.Request(data=True))
+        self.wait_for_map()
+        self.activate_scan_srv.call(SetBool.Request(data=False))
+        self.clear_map_srv.call(Empty.Request())
 
         # self.unpause_physics()
         self.activate_scan_srv.call(SetBool.Request(data=True))
-        self.clear_map_srv.call(Empty.Request())
-        self.wait_for_map()
 
         frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
             env_idx)
@@ -361,9 +362,6 @@ class AS2GymnasiumEnv(VecEnv):
         while self.observation_manager.wait_for_map == 0:
             pass
         return
-
-    def action_masks(self):
-        return self.observation_manager.get_action_mask(0)
 
     def frontier_features(self):
         frontier_features = self.observation_manager.get_frontier_features()

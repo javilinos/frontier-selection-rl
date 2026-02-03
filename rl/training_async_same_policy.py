@@ -1,26 +1,24 @@
-from async_vector_env import AsyncPPO
-from as2_gymnasium_env_discrete_multiagent import AS2GymnasiumEnv
-from gymnasium.spaces import Box, Dict, Discrete
+from environments.async_vector_env import AsyncPPO
+from environments.as2_gymnasium_env_discrete_multiagent_attention import AS2GymnasiumEnv
+from gymnasium.spaces import Box, Discrete
 import argparse
-from RL_ENV.policies.custom_cnn import CustomCombinedExtractor
+from algorithms.policies.features_extractors.custom_cnn import NatureCNN_Mod
 import time
 import rclpy
 import cProfile
 import pstats
 import torch
+import signal
+import sys
 from torch.distributions.constraints import Constraint
 from torch.distributions import constraints
 import numpy as np
 from torch.multiprocessing import Manager, Lock, Barrier, Condition, Queue
-from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env.vec_monitor import VecMonitor
-from stable_baselines3.common.vec_env import SubprocVecEnv
 
-from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy, MaskableActorCriticPolicy
-from sb3_contrib.common.wrappers import ActionMasker
-from concurrent_ppo_mask import MaskablePPO
-from stable_baselines3.common.utils import get_schedule_fn
+from algorithms.policies.custom_policy_attention import ActorCriticPolicy
+from algorithms.concurrent_custom_ppo import PPO
 from multiprocessing.managers import BaseManager
 
 
@@ -69,14 +67,22 @@ class CustomSimplex(Constraint):
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-4)
 
 
+class ConstantSchedule:
+    def __init__(self, value: float):
+        self.value = value
+
+    def __call__(self, _progress_remaining: float) -> float:
+        return float(self.value)
+
+
 class Training:
-    def __init__(self, env: AS2GymnasiumEnv, policy: MaskableMultiInputActorCriticPolicy, policy_lock: None,
+    def __init__(self, env: AS2GymnasiumEnv, policy: ActorCriticPolicy, policy_lock: None,
                  n_steps: int = 128,
                  batch_size: int = 32, n_epochs: int = 5, learning_rate: float = 0.00005,
                  pi_net_arch: list = [128, 128], vf_net_arch: list = [128, 128]):
         self.env = env
         # torch.cuda.is_available = lambda: False  # Disable cuda
-        self.model = MaskablePPO(
+        self.model = PPO(
             policy,
             self.env,
             verbose=1,
@@ -89,7 +95,8 @@ class Training:
             tensorboard_log=f"./tensorboard/{self.env.env_index}",
             policy_kwargs=dict(
                 net_arch=dict(pi=pi_net_arch, vf=vf_net_arch),
-                features_extractor_class=CustomCombinedExtractor,
+                features_extractor_class=NatureCNN_Mod,
+                share_features_extractor=True,
             )
         )
         print(f"Training with n_steps={n_steps}, batch_size={batch_size}, n_epochs={n_epochs}, \
@@ -149,7 +156,7 @@ if __name__ == "__main__":
                         default=[128, 128], help="Policy network architecture")
     parser.add_argument("--vf_net_arch", type=list,
                         default=[128, 128], help="Value function network architecture")
-    parser.add_argument("--policy_type", type=str, default="MultiInputPolicy", help="Policy type")
+    parser.add_argument("--policy_type", type=str, default="CnnPolicy", help="Policy type")
     args = parser.parse_args()
 
     action_space = Discrete(200 * 200)
@@ -166,7 +173,7 @@ if __name__ == "__main__":
     vec_sync = manager.list([False, False, False, False])
     # First three for reset
 
-    step_lengths = manager.list([10000.0, 10000.0, 10000.0, 10000.0])
+    step_lengths = manager.list([-1.0, -1.0, -1.0, -1.0])
 
     torch.distributions.Categorical.arg_constraints = {
         "probs": CustomSimplex(), "logits": constraints.real_vector}  # Modify simplex constrain to be less restrictive
@@ -174,59 +181,30 @@ if __name__ == "__main__":
     rclpy.init()
 
     policy_class = args.policy_type
-    learning_rate = 0.00005
+    learning_rate = 0.0003
 
-    if policy_class == "MultiInputPolicy":
-        observation_space = Dict(
-            {
-                "image": Box(
-                    low=0, high=255, shape=(1, 200, 200), dtype=np.uint8
-                ),  # Ocuppancy grid map: 0: free, 1: occupied, 2: unknown, 3: frontier point
-                "position": Box(low=0, high=200 - 1, shape=(2,), dtype=np.int32),
-                # Position of the drone in the grid
-            }
-        )
+    if policy_class != "CnnPolicy":
+        raise ValueError("Async attention training only supports CnnPolicy.")
 
-        SharedPolicyManager.register('MaskableMultiInputActorCriticPolicy',
-                                     MaskableMultiInputActorCriticPolicy)
-        manager = SharedPolicyManager()
-        manager.start()
+    observation_space = Box(low=0, high=255, shape=(5, 200, 200), dtype=np.uint8)
 
-        policy_kwargs = dict(
-            activation_fn=torch.nn.ReLU,
-            net_arch=dict(pi=[128, 128], vf=[128, 128]),
-            features_extractor_class=CustomCombinedExtractor
-        )
+    SharedPolicyManager.register('ActorCriticPolicy', ActorCriticPolicy)
+    manager = SharedPolicyManager()
+    manager.start()
 
-        # multiprocessing.set_start_method('spawn', force=True)
+    policy_kwargs = dict(
+        activation_fn=torch.nn.ReLU,
+        net_arch=dict(pi=[128, 128], vf=[128, 128]),
+        features_extractor_class=NatureCNN_Mod,
+        share_features_extractor=True,
+    )
 
-        policy = manager.MaskableMultiInputActorCriticPolicy(  # type: ignore[assignment]
-            observation_space,
-            action_space,
-            (0.0, learning_rate),
-            **policy_kwargs,
-        )
-
-    elif policy_class == "MlpPolicy":
-
-        observation_space = Box(low=0, high=1, shape=(
-            200 * 200 + 2,), dtype=np.float32)
-        SharedPolicyManager.register('MaskableActorCriticPolicy',
-                                     MaskableActorCriticPolicy)
-        manager = SharedPolicyManager()
-        manager.start()
-
-        policy_kwargs = dict(
-            # activation_fn=torch.nn.ReLU,
-            net_arch=dict(pi=[128, 128], vf=[128, 128])
-        )
-
-        policy = manager.MaskableActorCriticPolicy(  # type: ignore[assignment]
-            observation_space,
-            action_space,
-            (0.0, learning_rate),
-            **policy_kwargs,
-        )
+    policy = manager.ActorCriticPolicy(  # type: ignore[assignment]
+        observation_space,
+        action_space,
+        ConstantSchedule(learning_rate),
+        **policy_kwargs,
+    )
 
     policy = policy.to("cpu")
     policy.share_memory()
@@ -276,8 +254,25 @@ if __name__ == "__main__":
     # env = ActionMasker(env.venv, action_mask_fn=Training.mask_fn)
     # multiprocessing.set_start_method('fork', force=True)
     ppos = AsyncPPO([make_training_0, make_training_1, make_training_2, make_training_3])
-    ppos.call_async("train")
-    ppos.call_wait()
+
+    def _shutdown(signum=None, frame=None):
+        print("Shutdown requested, terminating worker processes...")
+        try:
+            ppos.close_extras(terminate=True)
+        finally:
+            try:
+                rclpy.shutdown()
+            finally:
+                sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    try:
+        ppos.call_async("train")
+        ppos.call_wait()
+    except KeyboardInterrupt:
+        _shutdown()
     # env0 = make_env_0()
     # # env1 = make_env_1()
     # print("Start mission")

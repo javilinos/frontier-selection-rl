@@ -7,7 +7,7 @@ usage() {
 }
 
 # Arg parser
-while getopts "s:r" opt; do
+while getopts "r" opt; do
   case "$opt" in
     s)
       case "$OPTARG" in
@@ -41,7 +41,7 @@ export GZ_SIM_RESOURCE_PATH=$PWD/assets/worlds:$PWD/assets/models:$GZ_SIM_RESOUR
 
 ## DEFAULTS
 display_rviz=true
-swarm=${swarm:="false"}
+swarm=${swarm:="true"}
 record_rosbag=${record_rosbag:="false"}
 launch_keyboard_teleop=${launch_keyboard_teleop:="false"}
 

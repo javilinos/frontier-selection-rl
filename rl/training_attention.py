@@ -126,7 +126,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     rclpy.init()
-    env = AS2GymnasiumEnv(world_name="world2", world_size=10.0,
+    env = AS2GymnasiumEnv(world_name="world_high_density", world_size=10.0,
                           grid_size=200, min_distance=1.0, num_envs=1, policy_type="CnnPolicy", testing=False)
     #
     env = VecMonitor(env)
