@@ -102,6 +102,7 @@ class AS2GymnasiumEnv(VecEnv):
 
         self.cum_path_length = []
         self.episode_path = []
+        self.invalid_frontiers = []
         self.area_explored = 0
         self.total_path_length = 0
         self.path_length = 0
@@ -299,7 +300,7 @@ class AS2GymnasiumEnv(VecEnv):
 
         print("Drone", self.drone_interface_list[env_idx].drone_id, " Frontiers gotten")
 
-        self.remove_shared_frontiers_from_observation()
+        # self.remove_shared_frontiers_from_observation()
         if len(self.observation_manager.frontiers) == 0:
             return self.reset_single_env(env_idx)
 
@@ -322,156 +323,166 @@ class AS2GymnasiumEnv(VecEnv):
 
     def step_wait(self) -> None:
         for idx, drone in enumerate(self.drone_interface_list):
-            # self.action_manager.actions = self.action_manager.generate_random_action()
-            valid_action = True
-            reserved = False
-            position_frontier = None
-            frontier = None
-            path_length = 0
-            path = []
-
-            if len(self.observation_manager.frontiers) == 0:
-                print("No frontiers available")
-                self.buf_rews[idx] = -1.0
+            print(f"taking action drone {drone.drone_id}")
+            frontier, path_length, result, path = self.action_manager.take_action(
+                self.observation_manager.frontiers, idx)
+            if not result:
+                print(f"Failed to reach goal (Invalid action) for drone {drone.drone_id}")
                 self.buf_dones[idx] = False
-                valid_action = False
+                self.wait_for_map()
+                frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
+                    idx)
+                if not self.check_end_episode_cond(idx, drone):
+                    self.invalid_frontiers.append(frontier)
+                    for invalid_frontier in self.invalid_frontiers:
+                        try:
+                            invalid_frontier_idx = self.observation_manager.frontiers.index(invalid_frontier)
+                            self.observation_manager.frontiers.pop(invalid_frontier_idx)
+                            self.observation_manager.position_frontiers.pop(invalid_frontier_idx)
+                        except ValueError as e:
+                            print(f"Drone {drone.drone_id} Frontier not found")
 
-            if valid_action:
-                action_index = int(self.action_manager.actions[idx])
-                if action_index < 0 or action_index >= len(self.observation_manager.frontiers):
-                    print("Invalid action index")
+                    print(f"Invalid frontier for drone {drone.drone_id}")
                     self.buf_rews[idx] = -1.0
-                    valid_action = False
+                    obs = self._get_obs(idx)
+                    self._save_obs(idx, obs)
+                    self.buf_infos[idx] = {}  # TODO: Add info
+                    self.buf_dones[idx] = False
 
-            if valid_action:
-                position_frontier = self.observation_manager.position_frontiers[action_index]
-                with self.lock:
-                    if position_frontier in self.shared_frontiers:
-                        reserved = False
-                    else:
-                        self.shared_frontiers.append(position_frontier)
-                        reserved = True
-                if not reserved:
-                    print("Frontier already chosen")
-                    self.buf_rews[idx] = -1.0
-                    valid_action = False
+                return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
+            
+            self.invalid_frontiers = []
+            self.wait_for_map()
+            future = self.activate_scan_srv.call_async(SetBool.Request(data=False))
 
-            if valid_action:
-                frontier, path_length, result, path = self.action_manager.take_action(
-                    self.observation_manager.frontiers, idx)
-
-                if not result:
-                    print("Failed to reach goal")
-                    self.buf_rews[idx] = -1.0
-                    valid_action = False
-
-            if valid_action:
-                future = self.activate_scan_srv.call_async(SetBool.Request(data=False))
-                while rclpy.ok():
-                    if future.done():
-                        break
+            while rclpy.ok():
+                if future.done():
+                    break
 
             with self.lock:
-                self.step_lengths[self.env_index] = len(path) if valid_action else 0
+                if frontier not in self.shared_frontiers:
+                    self.shared_frontiers.append(
+                        frontier)
+                self.step_lengths[self.env_index] = len(path)
 
             if self.sync_step:
+                print("queue empty")
                 self.barrier_step.wait()
 
             self.sync_step = False
 
             with self.condition:
-                self.condition.notify_all()
+                self.condition.notify_all()  
 
             while True:
                 try:
                     self.barrier_step.wait()
-                except BrokenBarrierError:
+                except BrokenBarrierError as e:
                     print("Barrier broken")
-
-                with self.lock:
-                    length = self._min_positive_step_length()
-
-                if length == 0:
-                    try:
-                        break
-                    except BrokenBarrierError:
-                        print("Barrier broken")
-                        break
-
                 print("Drone", drone.drone_id, " substep started")
-                if self.step_lengths[self.env_index] > 0:
-                    print("Drone", drone.drone_id, " before set pose: length",
-                          length, " path length: ", len(path))
-                    self.set_pose(drone.drone_id, path[length - 1][0], path[length - 1][1])
-                    print("Drone", drone.drone_id, " after set pose to ", path[length - 1])
-
+                with self.lock:
+                    self.condition.wait_for(
+                        lambda: min(self.step_lengths) != 0
+                    )
+                    length = min(self.step_lengths) 
+                                       
+                print("Drone", drone.drone_id, " before set pose: length",
+                      length, " path length: ", len(path))
+                self.set_pose(drone.drone_id, path[length - 1][0], path[length - 1][1])
+                print("Drone", drone.drone_id, " after set pose to ", path[length - 1])
                 try:
                     self.barrier_step.wait()
-                except BrokenBarrierError:
+                except BrokenBarrierError as e:
                     print("Barrier broken")
                 print("Drone", drone.drone_id, " substep done")
-
-                if self.step_lengths[self.env_index] > 0:
+                if all(step_length == self.step_lengths[0] for step_length in self.step_lengths):
+                    break
+                elif length == len(path):
+                    print("Drone", drone.drone_id, " donete ")
+                    with self.lock:
+                        if not any((step_length == 0) for step_length in self.step_lengths):
+                            for i in range(self.num_drones):
+                                self.step_lengths[i] -= length
+                    print("Drone", drone.drone_id, " donete despues")
+                    break
+                else:
                     path = path[length:]
-                    with self.lock:
-                        self.step_lengths[self.env_index] = max(
-                            self.step_lengths[self.env_index] - length, 0)
+                    with self.condition:
+                        print(f"Drone {drone.drone_id} waiting for other drones")
+                        self.condition.wait(timeout=5.0)
+                        print(f"Drone {drone.drone_id} woke up")
 
-            if valid_action:
-                self.lock.acquire(timeout=5)
-                try:
-                    future = self.activate_scan_srv.call_async(SetBool.Request(data=True))
-                    then = time.time()
-                    while rclpy.ok():
-                        if future.done():
-                            if future.result() is not None:
-                                activate_scan_res = future.result()
-                                if activate_scan_res.success:
-                                    break
-                        if time.time() - then > 1.0:
-                            print(f"Drone{self.env_index} service call timeout, calling again...")
-                            future = self.activate_scan_srv.call_async(
-                                SetBool.Request(data=True))
-                            then = time.time()
-                finally:
-                    self.lock.release()
+            self.lock.acquire(timeout=5)
+            try:
+                old_map = np.copy(self.observation_manager.grid_matrix[2])    
+                future = self.activate_scan_srv.call_async(SetBool.Request(data=True))
+                then = time.time()
+                while rclpy.ok():
+                    if future.done():
+                        if future.result() is not None:
+                            activate_scan_res = future.result()
+                            if activate_scan_res.success:
+                                break
+                    if time.time() - then > 1.0:
+                        print(f"Drone{self.env_index} service call timeout, calling again...")
+                        future = self.activate_scan_srv.call_async(
+                            SetBool.Request(data=True))
+                        then = time.time()
+                self.wait_for_map()
+                new_map = np.copy(self.observation_manager.grid_matrix[2])
+            finally:
+                self.lock.release()
 
-                self.wait_for_map(timeout_s=5.0)
+            print("Drone", drone.drone_id, " pre remove frontiers")
+            with self.lock:
+                if frontier in self.shared_frontiers:
+                    self.shared_frontiers.remove(frontier)
+            print("Drone", drone.drone_id, " pre wait for map")
 
-            if valid_action:
-                print("Drone", drone.drone_id, " pre remove frontiers")
-                with self.lock:
-                    if position_frontier in self.shared_frontiers:
-                        self.shared_frontiers.remove(position_frontier)
+            frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
+                self.env_index)
 
-                frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
-                    self.env_index)
+            obs = self._get_obs(idx)
+            self._save_obs(idx, obs)
 
-                self.remove_shared_frontiers_from_observation()
+            max_distance = math.sqrt((self.world_size * 2)**2 + (self.world_size * 2)**2)
 
-                obs = self._get_obs(idx)
-                self._save_obs(idx, obs)
-                self.buf_infos[idx] = {}  # TODO: Add info
+            max_area = self.grid_size * self.grid_size
 
-                max_distance = math.sqrt((self.world_size * 2)**2 + (self.world_size * 2)**2)
+            discovered_area_rew = (np.sum(old_map == 0)-
+                                    np.sum(new_map == 0)) / max_area
 
-                self.buf_rews[idx] = -(path_length / max_distance)
-                self.buf_dones[idx] = False
-                self.total_path_length += path_length
-                self.area_explored = discovered_area
-            else:
-                if reserved and position_frontier is not None:
-                    with self.lock:
-                        if position_frontier in self.shared_frontiers:
-                            self.shared_frontiers.remove(position_frontier)
-                self.observation_manager.get_frontiers_and_position(self.env_index)
-                self.remove_shared_frontiers_from_observation()
-                obs = self._get_obs(idx)
-                self._save_obs(idx, obs)
-                self.buf_infos[idx] = {}
-                self.buf_dones[idx] = False
+            print(f"drone {drone.drone_id} discovered area reward: {discovered_area_rew}")
+
+            path_length_rew = -(path_length / max_distance)  # Reward based on path length
+
+            distance_to_closest_drone_rew = max_distance
+
+            for drone_id, drone_position in self.observation_manager.swarm_position.items():
+                if drone_id != drone.drone_id:
+                    dist = self.distance((drone_position[0], drone_position[1]),
+                                         (drone.position[0], drone.position[1]))
+                    if dist < distance_to_closest_drone_rew:
+                        distance_to_closest_drone_rew = dist
+
+            distance_to_closest_drone_rew = distance_to_closest_drone_rew / \
+                max_distance  # Reward based on distance to closest drone
+
+            self.buf_infos[idx] = {}  # TODO: Add info
+            self.buf_rews[idx] = path_length_rew + \
+                distance_to_closest_drone_rew + discovered_area
+            self.buf_dones[idx] = False
+
+            for frontier in self.observation_manager.frontiers:
+                if frontier in self.shared_frontiers:
+                    print("Frontier already chosen")
+                    shared_frontier_index = self.observation_manager.frontiers.index(frontier)
+                    self.observation_manager.position_frontiers.pop(shared_frontier_index)
+                    self.observation_manager.frontiers.pop(shared_frontier_index)
 
             self.check_end_episode_cond(idx, drone)
+
+            print(f"finished step: Drone {drone.drone_id}")
 
         return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
 
@@ -577,7 +588,8 @@ class AS2GymnasiumEnv(VecEnv):
                 self.observation_manager.frontiers.pop(index)
 
     def check_end_episode_cond(self, idx, drone: DroneInterfaceTeleop):
-        if len(self.observation_manager.position_frontiers) == 0:
+        finish = len(self.observation_manager.position_frontiers) == 0
+        if finish:
             print(f"Drone{self.drone_interface_list[0].drone_id} No frontiers left")
 
             self.buf_dones[idx] = True
@@ -592,7 +604,7 @@ class AS2GymnasiumEnv(VecEnv):
             self.lock.acquire(timeout=5)
             try:
                 # Mark this env as inactive so _min_positive_step_length ignores it.
-                self.step_lengths[self.env_index] = -1
+                self.step_lengths[self.env_index] = 10000
             finally:
                 self.lock.release()
 
@@ -606,6 +618,8 @@ class AS2GymnasiumEnv(VecEnv):
             self.reset_single_env(idx)
 
             print("Drone", drone.drone_id, "done")
+
+        return finish
 
     def frontier_features(self):
         self.remove_shared_frontiers_from_observation()
