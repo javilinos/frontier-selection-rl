@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+from multiprocessing import RLock
+import concurrent.futures as cf
+from rclpy.task import Future as RclpyFuture
+from typing import Any, Optional
 from gymnasium.spaces import Box, Discrete, MultiDiscrete
 import numpy as np
 from as2_msgs.action import NavigateToPoint
@@ -9,45 +15,116 @@ from geometry_msgs.msg import PointStamped, Point
 import time
 
 
+class PatchRclpyIssue1123(ActionClient):
+
+    _lock: RLock = None  # type: ignore
+
+    @property
+    def _cpp_client_handle_lock(self):
+        if self._lock is None:
+            self._lock = RLock()
+        return self._lock
+    
+    def send_goal(self, *args: Any, **kwargs: Any) -> Any:
+        with self._cpp_client_handle_lock:
+            return super().send_goal(*args, **kwargs)
+
+    async def execute(self, *args: Any, **kwargs: Any) -> None:
+        with self._cpp_client_handle_lock:
+            return await super().execute(*args, **kwargs)  # type: ignore
+
+    def send_goal_async(self, *args: Any, **kwargs: Any) -> RclpyFuture:
+        with self._cpp_client_handle_lock:
+            return super().send_goal_async(*args, **kwargs)
+
+    def _cancel_goal_async(self, *args: Any, **kwargs: Any) -> RclpyFuture:
+        with self._cpp_client_handle_lock:
+            return super()._cancel_goal_async(*args, **kwargs)
+
+    def _get_result_async(self, *args: Any, **kwargs: Any) -> RclpyFuture:
+        with self._cpp_client_handle_lock:
+            return super()._get_result_async(*args, **kwargs)
+
+# class PathActionClient:
+#     def __init__(self, drone_interface):
+#         self._action_client = PatchRclpyIssue1123(
+#             drone_interface,
+#             NavigateToPoint,
+#             f"{drone_interface.get_namespace()}/navigate_to_point",
+#         )
+#         self.drone_interface = drone_interface
+
+#     def send_goal(self, point: list[float, float]):
+#         goal_msg = NavigateToPoint.Goal()
+#         goal_msg.point.point.x = point[0]
+#         goal_msg.point.point.y = point[1]
+#         goal_msg.point.header.frame_id = "earth"
+#         self._action_client.wait_for_server()
+#         result = self._action_client.send_goal(goal_msg)
+#         return result.result.success, result.result.path_length.data, result.result.path
+
+
 class PathActionClient:
     def __init__(self, drone_interface):
-        self._action_client = ActionClient(
+        self.drone_interface = drone_interface
+        self._action_client = PatchRclpyIssue1123(
             drone_interface,
             NavigateToPoint,
             f"{drone_interface.get_namespace()}/navigate_to_point",
         )
-        self.drone_interface = drone_interface
-        self._last_server_check = 0.0
-        self._check_interval_s = 30.0
-
-    def _log_action_server_publishers(self) -> None:
-        now = time.time()
-        if (now - self._last_server_check) < self._check_interval_s:
-            return
-        self._last_server_check = now
-        try:
-            namespace = self.drone_interface.get_namespace()
-            status_topic = f"{namespace}/navigate_to_point/_action/status"
-            publishers = self.drone_interface.get_publishers_info_by_topic(status_topic)
-            count = len(publishers)
-            if count > 1:
-                print(f"[WARN] Multiple action servers detected for {status_topic}: {count}")
-                for pub in publishers:
-                    print(
-                        f"[WARN]  - node={pub.node_name} ns={pub.node_namespace} qos={pub.qos_profile}"
-                    )
-        except Exception as exc:
-            print(f"[WARN] Action server check failed: {exc}")
-
-    def send_goal(self, point: list[float, float]):
-        self._log_action_server_publishers()
-        goal_msg = NavigateToPoint.Goal()
-        goal_msg.point.point.x = point[0]
-        goal_msg.point.point.y = point[1]
-        goal_msg.point.header.frame_id = "earth"
+        # Optional: do server wait once here to avoid repeated blocking waits
         self._action_client.wait_for_server()
-        result = self._action_client.send_goal(goal_msg)
-        return result.result.success, result.result.path_length.data, result.result.path
+
+    def send_goal_future(self, point: list[float]) -> cf.Future:
+        """
+        Returns a *blocking* concurrent.futures.Future whose result is:
+          (success: bool, path_length: float, path)
+        """
+        goal_msg = NavigateToPoint.Goal()
+        goal_msg.point.point.x = float(point[0])
+        goal_msg.point.point.y = float(point[1])
+        goal_msg.point.header.frame_id = "earth"
+
+        out: cf.Future = cf.Future()
+
+        goal_future = self._action_client.send_goal_async(goal_msg)
+
+        def _finish_with_exception(e: Exception):
+            if not out.done():
+                out.set_exception(e)
+
+        def _finish_with_result(tup):
+            if not out.done():
+                out.set_result(tup)
+
+        def _on_goal_done(fut: RclpyFuture):
+            try:
+                goal_handle = fut.result()
+                if goal_handle is None or not goal_handle.accepted:
+                    _finish_with_result((False, 0.0, None))
+                    return
+
+                result_future = goal_handle.get_result_async()
+
+                def _on_result_done(rfut: RclpyFuture):
+                    try:
+                        resp = rfut.result()
+                        if resp is None:
+                            _finish_with_result((False, 0.0, None))
+                            return
+                        res = resp.result
+                        _finish_with_result((res.success, res.path_length.data, res.path))
+                    except Exception as e:
+                        _finish_with_exception(e)
+
+                result_future.add_done_callback(_on_result_done)
+
+            except Exception as e:
+                _finish_with_exception(e)
+
+        goal_future.add_done_callback(_on_goal_done)
+        return out
+
 
 
 class ActionSingleValue:
@@ -265,8 +342,13 @@ class DiscreteFrontierIndexAction:  # To be used with MaskablePPO
         # result, path_length, _ = self.generate_path_action_client_list[env_id].send_goal(frontier)
         frontier = grid_frontier_list[action]
         frontier = self.convert_grid_position_to_pose(frontier)
-        result, path_length, path = self.generate_path_action_client_list[env_id].send_goal(
-            frontier)
+        # result, path_length, path = self.generate_path_action_client_list[env_id].send_goal(
+        #     frontier)
+        fut = self.generate_path_action_client_list[env_id].send_goal_future(frontier)
+
+        # This blocks UNTIL the future completes.
+        # This is safe as long as the node is spinning in the background thread.
+        result, path_length, path = fut.result()
         nav_path = []
         if result:
             for point in path:
@@ -317,8 +399,13 @@ class DiscreteFrontierIndexAction:  # To be used with MaskablePPO
         # action = self.convert_grid_position_to_pose(action_coord)
         frontier = frontier_list[action]
         # result, path_length, _ = self.generate_path_action_client_list[env_id].send_goal(frontier)
-        result, path_length, path = self.generate_path_action_client_list[env_id].send_goal(
-            frontier)
+        # result, path_length, path = self.generate_path_action_client_list[env_id].send_goal(
+        #     frontier)
+
+        fut = self.generate_path_action_client_list[env_id].send_goal_future(frontier)
+
+        # blocks properly
+        result, path_length, path = fut.result(timeout=10.0)  # tune timeout
         nav_path = []
         if result:
             for point in path:

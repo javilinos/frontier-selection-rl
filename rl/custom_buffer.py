@@ -163,38 +163,36 @@ class BaseBuffer(ABC):
         return reward
 
 
+import numpy as np
+import torch as th
+from gymnasium import spaces
+from typing import Generator, Optional, Union
+
+from stable_baselines3.common.vec_env import VecNormalize
+
+# Uses your existing RolloutBufferSamples NamedTuple and BaseBuffer
+
+
 class RolloutBuffer(BaseBuffer):
     """
-    Rollout buffer used in on-policy algorithms like A2C/PPO.
-    It corresponds to ``buffer_size`` transitions collected
-    using the current policy.
-    This experience will be discarded after the policy update.
-    In order to use PPO objective, we also store the current value of each state
-    and the log probability of each taken action.
+    Rollout buffer used in on-policy algorithms (PPO/A2C), modified for event-driven/SMDP PPO.
 
-    The term rollout here refers to the model-free notion and should not
-    be used with the concept of rollout used in model-based RL or planning.
-    Hence, it is only involved in policy and value function training but not action selection.
+    Key features:
+    - Stores per-transition 'distance' (or any duration proxy).
+    - Computes TD/GAE using discount = gamma ** (distance / distance_unit).
+    - Can act as:
+        * individual per-agent buffer (collect transitions for one agent)
+        * shared buffer that merges transitions from many individual buffers
 
-    :param buffer_size: Max number of element in the buffer
-    :param observation_space: Observation space
-    :param action_space: Action space
-    :param device: PyTorch device
-    :param gae_lambda: Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-        Equivalent to classic advantage when set to 1.
-    :param gamma: Discount factor
-    :param n_envs: Number of parallel environments
+    Recommended usage:
+    - Individual buffers: n_envs=1, buffer_size = "max events you might collect before flush"
+    - Shared buffer:      n_envs=1, buffer_size = N_total_events_for_update
+    - When global event count reaches N_total_events_for_update:
+        1) compute_returns_and_advantage for each individual buffer (with its own last_values)
+        2) shared.reset()
+        3) shared.add_from(individual_buffer_i) for each agent until shared.full
+        4) train PPO on shared.get()
     """
-
-    observations: np.ndarray
-    frontier_features: list[list[np.ndarray]]
-    actions: np.ndarray
-    rewards: np.ndarray
-    advantages: np.ndarray
-    returns: np.ndarray
-    episode_starts: np.ndarray
-    log_probs: np.ndarray
-    values: np.ndarray
 
     def __init__(
         self,
@@ -202,23 +200,38 @@ class RolloutBuffer(BaseBuffer):
         observation_space: spaces.Space,
         action_space: spaces.Space,
         device: Union[th.device, str] = "auto",
-        gae_lambda: float = 1,
+        gae_lambda: float = 1.0,
         gamma: float = 0.99,
         n_envs: int = 1,
-        frontier_features_space: spaces.Space = spaces.Box(low=0.0, high=1.0, shape=(
-            5,), dtype=np.float32),
+        frontier_features_space: spaces.Space = spaces.Box(
+            low=0.0, high=1.0, shape=(5,), dtype=np.float32
+        ),
+        distance_unit: float = 1.0,
+        eps: float = 1e-8,
     ):
         super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
-        self.gae_lambda = gae_lambda
-        self.gamma = gamma
-        self.generator_ready = False
+        if n_envs != 1:
+            # You *can* relax this, but your async/event-driven design usually wants n_envs=1 per agent buffer.
+            raise ValueError(
+                "This event-driven RolloutBuffer is intended for n_envs=1. "
+                "Use one buffer per agent (and per env if you later vectorize)."
+            )
+
+        if distance_unit <= 0:
+            raise ValueError("distance_unit must be > 0")
+
+        self.gae_lambda = float(gae_lambda)
+        self.gamma = float(gamma)
         self.frontier_features_space = frontier_features_space
+        self.distance_unit = float(distance_unit)
+        self.eps = float(eps)
+
+        self.generator_ready = False
         self.reset()
 
     def reset(self) -> None:
-        self.observations = np.zeros(
-            (self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
-        self.frontier_features = list()
+        self.observations = np.zeros((self.buffer_size, self.n_envs, *self.obs_shape), dtype=np.float32)
+        self.frontier_features = []  # list of frontier-feature-lists, one per step
         self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
         self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
@@ -226,47 +239,61 @@ class RolloutBuffer(BaseBuffer):
         self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
         self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+
+        # NEW: duration proxy per transition (distance traveled, meters)
+        self.distances = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+
         self.generator_ready = False
         super().reset()
 
+    # -------------------------
+    # SMDP discounting helpers
+    # -------------------------
+    def _discount_from_distance(self, distance: np.ndarray) -> np.ndarray:
+        """
+        distance: shape (n_envs,) == (1,)
+        discount = gamma ** (distance / distance_unit)
+        """
+        dist = np.maximum(distance.astype(np.float32), 0.0)
+        units = dist / max(self.distance_unit, self.eps)
+        # float64 internal for stability, then float32
+        return np.power(self.gamma, units, dtype=np.float64).astype(np.float32)
+
     def compute_returns_and_advantage(self, last_values: th.Tensor, dones: np.ndarray) -> None:
         """
-        Post-processing step: compute the lambda-return (TD(lambda) estimate)
-        and GAE(lambda) advantage.
+        Compute GAE(lambda) and returns using variable discount per step.
 
-        Uses Generalized Advantage Estimation (https://arxiv.org/abs/1506.02438)
-        to compute the advantage. To obtain Monte-Carlo advantage estimate (A(s) = R - V(S))
-        where R is the sum of discounted reward with value bootstrap
-        (because we don't always have full episode), set ``gae_lambda=1.0`` during initialization.
-
-        The TD(lambda) estimator has also two special cases:
-        - TD(1) is Monte-Carlo estimate (sum of discounted rewards)
-        - TD(0) is one-step estimate with bootstrapping (r_t + gamma * v(s_{t+1}))
-
-        For more information, see discussion in https://github.com/DLR-RM/stable-baselines3/pull/375.
-
-        :param last_values: state value estimation for the last step (one for each env)
-        :param dones: if the last step was a terminal step (one bool for each env).
+        last_values: shape [n_envs] == [1]
+        dones: shape [n_envs] == [1] indicating terminal at the last transition boundary.
         """
-        # Convert to numpy
-        last_values = last_values.clone().cpu().numpy().flatten()
+        # Only compute over the actually filled part if buffer isn't full (individual buffers often are not full).
+        n_steps = self.buffer_size if self.full else self.pos
+        if n_steps == 0:
+            return
 
-        last_gae_lam = 0
-        for step in reversed(range(self.buffer_size)):
-            if step == self.buffer_size - 1:
-                next_non_terminal = 1.0 - dones
-                next_values = last_values
+        last_values_np = last_values.clone().cpu().numpy().flatten().astype(np.float32)
+
+        last_gae_lam = np.zeros((self.n_envs,), dtype=np.float32)
+
+        for step in reversed(range(n_steps)):
+            if step == n_steps - 1:
+                next_non_terminal = 1.0 - dones.astype(np.float32)
+                next_values = last_values_np
             else:
-                next_non_terminal = 1.0 - self.episode_starts[step + 1]
+                next_non_terminal = 1.0 - self.episode_starts[step + 1].astype(np.float32)
                 next_values = self.values[step + 1]
-            delta = self.rewards[step] + self.gamma * \
-                next_values * next_non_terminal - self.values[step]
-            last_gae_lam = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lam
-            self.advantages[step] = last_gae_lam
-        # TD(lambda) estimator, see Github PR #375 or "Telescoping in TD(lambda)"
-        # in David Silver Lecture 4: https://www.youtube.com/watch?v=PnHCvfgC_ZA
-        self.returns = self.advantages + self.values
 
+            discount = self._discount_from_distance(self.distances[step])
+
+            delta = self.rewards[step] + discount * next_values * next_non_terminal - self.values[step]
+            last_gae_lam = delta + discount * self.gae_lambda * next_non_terminal * last_gae_lam
+            self.advantages[step] = last_gae_lam
+
+        self.returns[:n_steps] = self.advantages[:n_steps] + self.values[:n_steps]
+
+    # -------------------------
+    # Normal add (collection)
+    # -------------------------
     def add(
         self,
         obs: np.ndarray,
@@ -276,59 +303,152 @@ class RolloutBuffer(BaseBuffer):
         episode_start: np.ndarray,
         value: th.Tensor,
         log_prob: th.Tensor,
+        distance: Union[np.ndarray, float],
     ) -> None:
         """
-        :param obs: Observation
-        :param action: Action
-        :param reward:
-        :param episode_start: Start of episode signal.
-        :param value: estimated value of the current state
-            following the current policy.
-        :param log_prob: log probability of the action
-            following the current policy.
+        Add one event-driven transition.
+
+        distance: traveled distance (meters) for this option/transition (or another duration proxy).
+                  For n_envs=1 you can pass float.
         """
+        if self.full:
+            print("Warning: trying to add to a full buffer. Ignoring.")
+
         if len(log_prob.shape) == 0:
-            # Reshape 0-d tensor to avoid error
             log_prob = log_prob.reshape(-1, 1)
 
-        # Reshape needed when using multiple envs with discrete observations
-        # as numpy cannot broadcast (n_discrete,) to (n_discrete, 1)
         if isinstance(self.observation_space, spaces.Discrete):
             obs = obs.reshape((self.n_envs, *self.obs_shape))
 
-        # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
         action = action.reshape((self.n_envs, self.action_dim))
 
-        self.observations[self.pos] = np.array(obs)
+        # Normalize to shape (n_envs,) = (1,)
+        if np.isscalar(distance):
+            distance_arr = np.full((self.n_envs,), float(distance), dtype=np.float32)
+        else:
+            distance_arr = np.array(distance, dtype=np.float32).reshape((self.n_envs,))
+
+        self.observations[self.pos] = np.array(obs, dtype=np.float32)
         self.frontier_features.append(frontier_features)
-        self.actions[self.pos] = np.array(action)
-        self.rewards[self.pos] = np.array(reward)
-        self.episode_starts[self.pos] = np.array(episode_start)
-        self.values[self.pos] = value.clone().cpu().numpy().flatten()
-        self.log_probs[self.pos] = log_prob.clone().cpu().numpy()
+        self.actions[self.pos] = np.array(action, dtype=np.float32)
+        self.rewards[self.pos] = np.array(reward, dtype=np.float32).reshape((self.n_envs,))
+        self.episode_starts[self.pos] = np.array(episode_start, dtype=np.float32).reshape((self.n_envs,))
+
+        self.values[self.pos] = value.detach().cpu().numpy().flatten().astype(np.float32)
+        self.log_probs[self.pos] = log_prob.detach().cpu().numpy().reshape((self.n_envs,))
+
+        self.distances[self.pos] = distance_arr
+
         self.pos += 1
         if self.pos == self.buffer_size:
             self.full = True
 
-    def get(self, batch_size: Optional[int] = None) -> Generator[RolloutBufferSamples, None, None]:
-        assert self.full, ""
-        indices = np.random.permutation(self.buffer_size * self.n_envs)
-        # Prepare the data
-        if not self.generator_ready:
-            _tensor_names = [
-                "observations",
-                "actions",
-                "values",
-                "log_probs",
-                "advantages",
-                "returns",
-            ]
+    # -------------------------
+    # Merge helpers (individual -> shared)
+    # -------------------------
+    def export(self) -> dict:
+        """Return a picklable snapshot (only filled part)."""
+        n = self.buffer_size if self.full else self.pos
+        return {
+            "n": n,
+            "observations": self.observations[:n].copy(),
+            "actions": self.actions[:n].copy(),
+            "rewards": self.rewards[:n].copy(),
+            "episode_starts": self.episode_starts[:n].copy(),
+            "values": self.values[:n].copy(),
+            "log_probs": self.log_probs[:n].copy(),
+            "advantages": self.advantages[:n].copy(),
+            "returns": self.returns[:n].copy(),
+            "distances": self.distances[:n].copy(),
+            "frontier_features": list(self.frontier_features[:n]),
+        }
 
+    def add_from_export(self, data: dict) -> int:
+        """Append exported transitions into this buffer."""
+        if self.full:
+            return 0
+        n = int(data["n"])
+        if n <= 0:
+            return 0
+
+        n = min(n, self.buffer_size - self.pos)
+        dst = slice(self.pos, self.pos + n)
+        src = slice(0, n)
+
+        self.observations[dst] = data["observations"][src]
+        self.actions[dst] = data["actions"][src]
+        self.rewards[dst] = data["rewards"][src]
+        self.episode_starts[dst] = data["episode_starts"][src]
+        self.values[dst] = data["values"][src]
+        self.log_probs[dst] = data["log_probs"][src]
+        self.advantages[dst] = data["advantages"][src]
+        self.returns[dst] = data["returns"][src]
+        self.distances[dst] = data["distances"][src]
+
+        self.frontier_features.extend(data["frontier_features"][:n])
+
+        self.pos += n
+        if self.pos == self.buffer_size:
+            self.full = True
+
+        self.generator_ready = False
+        return n
+
+    @staticmethod
+    def finalize_individual_buffers_and_build_shared(
+        shared_buffer: "RolloutBuffer",
+        individual_buffers: list["RolloutBuffer"],
+        last_values_per_agent: list[th.Tensor],
+        dones: np.ndarray,
+    ) -> None:
+        """
+        Convenience helper for your workflow:
+
+        1) For each individual buffer i:
+            buffer_i.compute_returns_and_advantage(last_values_per_agent[i], dones)
+        2) shared_buffer.reset()
+        3) shared_buffer.add_from(buffer_i) in order until full
+
+        Requirements:
+        - shared_buffer.buffer_size should equal your desired N_total_events for PPO update
+        - individual buffers are n_envs=1
+        - dones is shape (1,) (global done) or compatible
+        """
+        if len(individual_buffers) != len(last_values_per_agent):
+            raise ValueError("last_values_per_agent must have one entry per individual buffer")
+
+        # 1) compute per-agent adv/returns
+        for buf, lv in zip(individual_buffers, last_values_per_agent):
+            buf.compute_returns_and_advantage(lv, dones)
+
+        # 2) fill shared buffer
+        shared_buffer.reset()
+        for buf in individual_buffers:
+            if shared_buffer.full:
+                break
+            shared_buffer.add_from(buf)
+
+        if not shared_buffer.full:
+            raise RuntimeError(
+                f"Shared buffer not full after merge: pos={shared_buffer.pos}, "
+                f"buffer_size={shared_buffer.buffer_size}. "
+                f"Either increase per-agent collection or lower shared buffer_size."
+            )
+
+    # -------------------------
+    # Sampling (training)
+    # -------------------------
+    def get(self, batch_size: Optional[int] = None) -> Generator["RolloutBufferSamples", None, None]:
+        assert self.full, "Shared buffer must be full before calling get()"
+
+        indices = np.random.permutation(self.buffer_size * self.n_envs)
+
+        if not self.generator_ready:
+            _tensor_names = ["observations", "actions", "values", "log_probs", "advantages", "returns"]
             for tensor in _tensor_names:
                 self.__dict__[tensor] = self.swap_and_flatten(self.__dict__[tensor])
             self.generator_ready = True
 
-        # Return everything, don't create minibatches
         if batch_size is None:
             batch_size = self.buffer_size * self.n_envs
 
@@ -337,30 +457,13 @@ class RolloutBuffer(BaseBuffer):
             yield self._get_samples(indices[start_idx: start_idx + batch_size])
             start_idx += batch_size
 
-    # def _get_samples(
-    #     self,
-    #     batch_inds: np.ndarray,
-    #     env: Optional[VecNormalize] = None,
-    # ) -> RolloutBufferSamples:
-    #     data = (
-    #         self.observations[batch_inds],
-    #         self.frontier_features[batch_inds],
-    #         self.actions[batch_inds],
-    #         self.values[batch_inds].flatten(),
-    #         self.log_probs[batch_inds].flatten(),
-    #         self.advantages[batch_inds].flatten(),
-    #         self.returns[batch_inds].flatten(),
-    #     )
-    #     return RolloutBufferSamples(*tuple(map(self.to_torch, data)))
-
     def _get_samples(
         self,
         batch_inds: np.ndarray,
         env: Optional[VecNormalize] = None,
-    ) -> RolloutBufferSamples:
-        # Convert each frontier feature to a torch tensor and index it by batch_inds
+    ) -> "RolloutBufferSamples":
         frontier_features = [self.frontier_features[i] for i in batch_inds]
-        # Process the rest of the data as before
+
         data = (
             self.observations[batch_inds],
             self.actions[batch_inds],
@@ -370,8 +473,8 @@ class RolloutBuffer(BaseBuffer):
             self.returns[batch_inds].flatten(),
         )
         data_torch = tuple(map(self.to_torch, data))
-        frontier_features_ret = [[self.to_torch(f).unsqueeze(0) for f in ff]
-                                 for ff in frontier_features]
+        frontier_features_ret = [[self.to_torch(f).unsqueeze(0) for f in ff] for ff in frontier_features]
+
         return RolloutBufferSamples(
             observations=data_torch[0],
             frontier_features=frontier_features_ret,
@@ -381,3 +484,4 @@ class RolloutBuffer(BaseBuffer):
             advantages=data_torch[4],
             returns=data_torch[5],
         )
+

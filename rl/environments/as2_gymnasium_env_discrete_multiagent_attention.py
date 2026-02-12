@@ -37,7 +37,7 @@ class AS2GymnasiumEnv(VecEnv):
                  env_index: int = 0,
                  shared_frontiers: list = None, lock=None, barrier_reset=None, barrier_step=None,
                  condition=None, queue=None, drones_initial_position=None, vec_sync: list = None,
-                 step_lengths: list = None, testing: bool = False) -> None:
+                 step_lengths: list = None, rollout_remaining=None, testing: bool = False) -> None:
         # ROS 2 related stuff
         self.drone_interface_list = [
             DroneInterfaceTeleop(drone_id=f"drone{env_index}", use_sim_time=True)
@@ -99,6 +99,7 @@ class AS2GymnasiumEnv(VecEnv):
         self.drones_initial_position: List = drones_initial_position
         self.vec_sync = vec_sync
         self.step_lengths = step_lengths
+        self.rollout_remaining = rollout_remaining
 
         self.cum_path_length = []
         self.episode_path = []
@@ -107,6 +108,7 @@ class AS2GymnasiumEnv(VecEnv):
         self.total_path_length = 0
         self.path_length = 0
         self.sync_step = True
+        self.max_range_limit = 3.0
         print(self.obstacles)
 
     def pause_physics(self) -> bool:
@@ -235,7 +237,9 @@ class AS2GymnasiumEnv(VecEnv):
 
     def reset_single_env(self, env_idx):
         self.barrier_reset.wait()
-        self.barrier_step.reset()
+        # self.barrier_step.reset()
+        self.barrier_step.increment()
+        self.barrier_step.print_status()
         print("Resetting drone", self.drone_interface_list[env_idx].drone_id)
         self.sync_step = True
 
@@ -260,6 +264,7 @@ class AS2GymnasiumEnv(VecEnv):
             future = self.clear_map_srv.call_async(Empty.Request())
             while rclpy.ok():
                 if future.done():
+                    print("map cleared service done")
                     break
 
         print("map cleared")
@@ -301,8 +306,8 @@ class AS2GymnasiumEnv(VecEnv):
         print("Drone", self.drone_interface_list[env_idx].drone_id, " Frontiers gotten")
 
         # self.remove_shared_frontiers_from_observation()
-        if len(self.observation_manager.frontiers) == 0:
-            return self.reset_single_env(env_idx)
+        # if len(self.observation_manager.frontiers) == 0:
+        #     return self.reset_single_env(env_idx)
 
         obs = self._get_obs(env_idx)
         self._save_obs(env_idx, obs)
@@ -332,22 +337,26 @@ class AS2GymnasiumEnv(VecEnv):
                 self.wait_for_map()
                 frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                     idx)
-                if not self.check_end_episode_cond(idx, drone):
-                    self.invalid_frontiers.append(frontier)
-                    for invalid_frontier in self.invalid_frontiers:
-                        try:
-                            invalid_frontier_idx = self.observation_manager.frontiers.index(invalid_frontier)
-                            self.observation_manager.frontiers.pop(invalid_frontier_idx)
-                            self.observation_manager.position_frontiers.pop(invalid_frontier_idx)
-                        except ValueError as e:
-                            print(f"Drone {drone.drone_id} Frontier not found")
+                self.invalid_frontiers.append(frontier)
+                for invalid_frontier in self.invalid_frontiers:
+                    try:
+                        invalid_frontier_idx = self.observation_manager.frontiers.index(invalid_frontier)
+                        self.observation_manager.frontiers.pop(invalid_frontier_idx)
+                        self.observation_manager.position_frontiers.pop(invalid_frontier_idx)
+                    except ValueError as e:
+                        print(f"Drone {drone.drone_id} Frontier not found")
 
-                    print(f"Invalid frontier for drone {drone.drone_id}")
-                    self.buf_rews[idx] = -1.0
-                    obs = self._get_obs(idx)
-                    self._save_obs(idx, obs)
-                    self.buf_infos[idx] = {}  # TODO: Add info
+                print(f"Invalid frontier for drone {drone.drone_id}")
+                
+                obs = self._get_obs(idx)
+                self._save_obs(idx, obs)
+                self.buf_infos[idx] = {"distance": 0.0}  # TODO: Add info
+
+                if not self.check_end_episode_cond(idx, drone):
+                    self.buf_rews[idx] = -10.0
                     self.buf_dones[idx] = False
+                else:
+                    self.buf_rews[idx] = 0.0
 
                 return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
             
@@ -365,9 +374,9 @@ class AS2GymnasiumEnv(VecEnv):
                         frontier)
                 self.step_lengths[self.env_index] = len(path)
 
-            if self.sync_step:
-                print("queue empty")
-                self.barrier_step.wait()
+            # if self.sync_step:
+            #     print("queue empty")
+            # self.barrier_step.wait()
 
             self.sync_step = False
 
@@ -376,21 +385,23 @@ class AS2GymnasiumEnv(VecEnv):
 
             while True:
                 try:
+                    self.barrier_step.print_status()
                     self.barrier_step.wait()
                 except BrokenBarrierError as e:
                     print("Barrier broken")
                 print("Drone", drone.drone_id, " substep started")
-                with self.lock:
+                with self.condition:
                     self.condition.wait_for(
                         lambda: min(self.step_lengths) != 0
                     )
-                    length = min(self.step_lengths) 
+                    length = min(self.step_lengths)
                                        
                 print("Drone", drone.drone_id, " before set pose: length",
                       length, " path length: ", len(path))
                 self.set_pose(drone.drone_id, path[length - 1][0], path[length - 1][1])
                 print("Drone", drone.drone_id, " after set pose to ", path[length - 1])
                 try:
+                    self.barrier_step.print_status()
                     self.barrier_step.wait()
                 except BrokenBarrierError as e:
                     print("Barrier broken")
@@ -412,7 +423,9 @@ class AS2GymnasiumEnv(VecEnv):
                         self.condition.wait(timeout=5.0)
                         print(f"Drone {drone.drone_id} woke up")
 
+            print(f"Drone {drone.drone_id} pre lock acquire")
             self.lock.acquire(timeout=5)
+            print(f"Drone {drone.drone_id} post lock acquire")
             try:
                 old_map = np.copy(self.observation_manager.grid_matrix[2])    
                 future = self.activate_scan_srv.call_async(SetBool.Request(data=True))
@@ -435,12 +448,23 @@ class AS2GymnasiumEnv(VecEnv):
 
             print("Drone", drone.drone_id, " pre remove frontiers")
             with self.lock:
-                if frontier in self.shared_frontiers:
-                    self.shared_frontiers.remove(frontier)
+                try:
+                    if frontier in self.shared_frontiers:
+                        self.shared_frontiers.remove(frontier)
+                except ValueError as e:
+                    print(f"Drone {drone.drone_id} Frontier not found in shared frontiers")
+                    
             print("Drone", drone.drone_id, " pre wait for map")
 
             frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                 self.env_index)
+            
+            for frontier in self.observation_manager.frontiers:
+                if frontier in self.shared_frontiers:
+                    print("Frontier already chosen")
+                    shared_frontier_index = self.observation_manager.frontiers.index(frontier)
+                    self.observation_manager.position_frontiers.pop(shared_frontier_index)
+                    self.observation_manager.frontiers.pop(shared_frontier_index)
 
             obs = self._get_obs(idx)
             self._save_obs(idx, obs)
@@ -449,40 +473,33 @@ class AS2GymnasiumEnv(VecEnv):
 
             max_area = self.grid_size * self.grid_size
 
-            discovered_area_rew = (np.sum(old_map == 0)-
-                                    np.sum(new_map == 0)) / max_area
-
-            print(f"drone {drone.drone_id} discovered area reward: {discovered_area_rew}")
+            discovered_area_rew = (np.sum(new_map == 0) - 
+                                   np.sum(old_map == 0)) / max_area
 
             path_length_rew = -(path_length / max_distance)  # Reward based on path length
 
-            distance_to_closest_drone_rew = max_distance
+            distance_to_closest_drone_rew = 0.0
 
-            for drone_id, drone_position in self.observation_manager.swarm_position.items():
+            for drone_id, drone_position in self.observation_manager.swarm_position_real.items():
                 if drone_id != drone.drone_id:
                     dist = self.distance((drone_position[0], drone_position[1]),
                                          (drone.position[0], drone.position[1]))
-                    if dist < distance_to_closest_drone_rew:
+                    if dist < distance_to_closest_drone_rew or distance_to_closest_drone_rew == 0.0:
                         distance_to_closest_drone_rew = dist
 
-            distance_to_closest_drone_rew = distance_to_closest_drone_rew / \
-                max_distance  # Reward based on distance to closest drone
+            distance_to_closest_drone_rew = - (max_distance - distance_to_closest_drone_rew) / max_distance  # Reward based on distance to closest drone, The closer the worse, to encourage spreading out
 
-            self.buf_infos[idx] = {}  # TODO: Add info
+            self.buf_infos[idx] = {"distance": path_length}  # TODO: Add info
             self.buf_rews[idx] = path_length_rew + \
-                distance_to_closest_drone_rew + discovered_area
+                distance_to_closest_drone_rew + discovered_area_rew
             self.buf_dones[idx] = False
-
-            for frontier in self.observation_manager.frontiers:
-                if frontier in self.shared_frontiers:
-                    print("Frontier already chosen")
-                    shared_frontier_index = self.observation_manager.frontiers.index(frontier)
-                    self.observation_manager.position_frontiers.pop(shared_frontier_index)
-                    self.observation_manager.frontiers.pop(shared_frontier_index)
 
             self.check_end_episode_cond(idx, drone)
 
             print(f"finished step: Drone {drone.drone_id}")
+            with self.condition:
+                self.step_lengths[self.env_index] = 10000
+                self.condition.notify_all()
 
         return (self._obs_from_buf(), np.copy(self.buf_rews), np.copy(self.buf_dones), deepcopy(self.buf_infos))
 
@@ -586,9 +603,22 @@ class AS2GymnasiumEnv(VecEnv):
                 index = self.observation_manager.position_frontiers.index(shared_frontier)
                 self.observation_manager.position_frontiers.pop(index)
                 self.observation_manager.frontiers.pop(index)
+            
 
     def check_end_episode_cond(self, idx, drone: DroneInterfaceTeleop):
-        finish = len(self.observation_manager.position_frontiers) == 0
+        if len(self.observation_manager.frontiers) <= 10:
+            print(f"drone {self.env_index} printing observation manager frontiers: {self.observation_manager.frontiers}")
+            with self.lock:
+                for shared_frontier in self.shared_frontiers:
+                    print(f"drone {self.env_index} printing shared frontier ({shared_frontier[0]}, {shared_frontier[1]})")
+                    for frontier in self.observation_manager.frontiers:
+                        if self.distance((shared_frontier[0], shared_frontier[1]), (frontier[0], frontier[1])) <= self.max_range_limit:
+                            frontier_idx = self.observation_manager.frontiers.index(frontier)
+                            self.observation_manager.frontiers.pop(frontier_idx)
+                            self.observation_manager.position_frontiers.pop(frontier_idx)
+                            print(f"shared frontier ({shared_frontier[0]}, {shared_frontier[1]}), within range of frontier ({frontier[0]}, {frontier[1]})")
+
+        finish = len(self.observation_manager.frontiers) == 0
         if finish:
             print(f"Drone{self.drone_interface_list[0].drone_id} No frontiers left")
 
@@ -601,18 +631,21 @@ class AS2GymnasiumEnv(VecEnv):
             finally:
                 self.lock.release()
 
-            self.lock.acquire(timeout=5)
-            try:
+            # self.lock.acquire(timeout=5)
+            # try:
                 # Mark this env as inactive so _min_positive_step_length ignores it.
-                self.step_lengths[self.env_index] = 10000
-            finally:
-                self.lock.release()
-
-            if not self.barrier_step.broken:
-                self.barrier_step.abort()
+            # finally:
+            #     self.lock.release()
 
             with self.condition:
+                self.step_lengths[self.env_index] = 10000
                 self.condition.notify_all()
+
+            # if not self.barrier_step.broken:
+            #     self.barrier_step.abort()
+            self.barrier_step.decrement()
+            self.barrier_step.print_status()
+
 
             print("Drone", drone.drone_id, " before reset")
             self.reset_single_env(idx)
@@ -620,6 +653,7 @@ class AS2GymnasiumEnv(VecEnv):
             print("Drone", drone.drone_id, "done")
 
         return finish
+
 
     def frontier_features(self):
         self.remove_shared_frontiers_from_observation()

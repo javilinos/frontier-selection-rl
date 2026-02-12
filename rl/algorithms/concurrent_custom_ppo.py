@@ -48,7 +48,8 @@ class PPO(OnPolicyAlgorithm):
 
     def __init__(
         self,
-        policy: ActorCriticPolicy,
+        policy: None,
+        shared_buffer: None,
         env: Union[GymEnv, str],
         learning_rate: Union[float, Schedule] = 3e-4,
         n_steps: int = 2048,
@@ -75,6 +76,17 @@ class PPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         lock: None = None,
         _init_setup_model: bool = True,
+        rollout_remaining=None,
+        global_timesteps=None,
+        batch_id=None,
+        env_barrier_step=None,
+        env_barrier_reset=None,
+        barrier_collect_done=None,
+        barrier_train_done=None,
+        is_learner: bool=False,
+        rollout_pool=None,
+        n_envs_total: int=1,
+        n_steps_total: int=0,
     ):
         super().__init__(
             ActorCriticPolicy,
@@ -127,12 +139,25 @@ class PPO(OnPolicyAlgorithm):
                 )
 
         self.batch_size = batch_size
+        self.shared_buffer = shared_buffer
         self.n_epochs = n_epochs
         self.clip_range = clip_range
         self.clip_range_vf = clip_range_vf
         self.normalize_advantage = normalize_advantage
         self.target_kl = target_kl
         self.lock = lock
+
+        self.rollout_remaining = rollout_remaining
+        self.global_timesteps = global_timesteps
+        self.batch_id = batch_id
+        self.barrier_collect_done = barrier_collect_done
+        self.barrier_train_done = barrier_train_done
+        self.is_learner = is_learner
+        self.n_envs_total = n_envs_total
+        self.n_steps_total = n_steps_total
+        self.rollout_pool = rollout_pool
+        self.env_barrier_step = env_barrier_step
+        self.env_barrier_reset = env_barrier_reset
 
         if _init_setup_model:
             self._setup_model(policy)
@@ -167,6 +192,15 @@ class PPO(OnPolicyAlgorithm):
 
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
 
+    def _reserve_one(self) -> bool:
+        # Returns True if this process is allowed to collect one more transition for the current batch
+        with self.lock:
+            if self.rollout_remaining.value <= 0:
+                return False
+            self.rollout_remaining.value -= 1
+            return True
+
+
     def collect_rollouts(
         self,
         env: VecEnv,
@@ -184,7 +218,7 @@ class PPO(OnPolicyAlgorithm):
 
         callback.on_rollout_start()
 
-        while n_steps < n_rollout_steps:
+        while self._reserve_one():
             if self.use_sde and self.sde_sample_freq > 0 and n_steps % self.sde_sample_freq == 0:
                 self.policy.reset_noise(env.num_envs)
 
@@ -213,7 +247,8 @@ class PPO(OnPolicyAlgorithm):
 
             new_obs, rewards, dones, infos = env.step(clipped_actions)
 
-            self.num_timesteps += env.num_envs
+            with self.lock:
+                self.global_timesteps.value += env.num_envs
 
             callback.update_locals(locals())
             if not callback.on_step():
@@ -248,12 +283,28 @@ class PPO(OnPolicyAlgorithm):
                 self._last_episode_starts,  # type: ignore[arg-type]
                 values,
                 log_probs,
+                infos[0]["distance"],
             )
+
             self._last_obs = new_obs  # type: ignore[assignment]
             self._last_episode_starts = dones
 
             last_frontier_features = env.frontier_features()
             features_list = []
+
+        self.env_barrier_step.decrement()
+        self.env_barrier_reset.decrement()
+        self.env_barrier_step.print_status()
+
+        if n_steps == 0:
+            # Export empty buffer and sync
+            self.rollout_pool[self.env.env_index] = rollout_buffer.export()
+            self.env_barrier_step.increment()
+            self.env_barrier_reset.increment()
+            self.barrier_collect_done.wait()
+            self.barrier_train_done.wait()
+            return True
+        
         with th.no_grad():
             for frontier_feature in last_frontier_features:
                 features_list.append(
@@ -265,9 +316,43 @@ class PPO(OnPolicyAlgorithm):
 
         rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
+        self.rollout_pool[self.env.env_index] = rollout_buffer.export()
+
+        print(f"Drone {self.env.env_index} finished done training.")
+        self.barrier_collect_done.wait()
+        print(f"Drone {self.env.env_index} finished post done training.")
+
+        if self.is_learner:
+            assert self.shared_buffer is not None, "Learner must be constructed with a local shared_buffer"
+            self.shared_buffer.reset()
+            for i in range(self.n_envs_total):
+                data = self.rollout_pool[i]
+                self.shared_buffer.add_from_export(data)
+
+            # Train using merged buffer but DO NOT permanently replace local rollout_buffer
+            old_buffer = self.rollout_buffer
+            try:
+                self.rollout_buffer = self.shared_buffer
+                self.num_timesteps = self.global_timesteps.value
+                self.train()
+            finally:
+                self.rollout_buffer = old_buffer
+
+            # Reset budget for next batch:
+            with self.lock:
+                self.rollout_remaining.value = self.n_steps_total
+                self.batch_id.value += 1
+
         callback.update_locals(locals())
 
         callback.on_rollout_end()
+
+        print(f"Drone {self.env.env_index} finished training.")
+        self.env_barrier_step.increment()
+        self.env_barrier_step.print_status()
+        self.env_barrier_reset.increment()
+        self.barrier_train_done.wait()
+        print(f"Drone {self.env.env_index} post barrier_train.")
 
         return True
 
@@ -397,7 +482,8 @@ class PPO(OnPolicyAlgorithm):
 
         assert self.env is not None
 
-        while self.num_timesteps < total_timesteps:
+        while self.global_timesteps.value < total_timesteps:
+            print(f"Parameters: {list(self.policy.parameters())[0][0][0]}")
             continue_training = self.collect_rollouts(
                 self.env, callback, self.rollout_buffer, self.n_steps
             )
@@ -406,13 +492,13 @@ class PPO(OnPolicyAlgorithm):
                 break
 
             iteration += 1
-            self._update_current_progress_remaining(self.num_timesteps, total_timesteps)
+            self._update_current_progress_remaining(self.global_timesteps.value, total_timesteps)
 
             if log_interval is not None and iteration % log_interval == 0:
                 self._dump_logs(iteration)
-            print(f"Parameters: {list(self.policy.parameters())[0][0][0]}")
-            with self.lock:
-                self.train()
+           
+            # with self.lock:
+            #     self.train()
             print(f"Parameters: {list(self.policy.parameters())[0][0][0]}")
 
         callback.on_training_end()

@@ -1397,6 +1397,7 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
 
         self.swarm_position_sub = []
         self.swarm_position = {}
+        self.swarm_position_real = {}
         if num_drones is None:
             num_drones = len(self.drone_interface_list)
 
@@ -1407,6 +1408,7 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
                         self, f"swarm_position_callback_{i}"), qos_profile_sensor_data
                 ))
             self.swarm_position[f"drone{i}"] = (0, 0)
+            self.swarm_position_real[f"drone{i}"] = (0.0, 0.0)
 
         # self.get_frontiers_pub = self.drone_interface_list[0].create_publisher(
         #     GetFrontierReq, "/get_frontiers_req", 1
@@ -1492,18 +1494,22 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         self.wait_for_map = 1
 
     def swarm_position_callback_0(self, msg: PoseStamped):
+        self.swarm_position_real["drone0"] = (msg.pose.position.x, msg.pose.position.y)
         self.swarm_position["drone0"] = self.convert_pose_to_grid_position(
             [msg.pose.position.x, msg.pose.position.y])
 
     def swarm_position_callback_1(self, msg: PoseStamped):
+        self.swarm_position_real["drone1"] = (msg.pose.position.x, msg.pose.position.y)
         self.swarm_position["drone1"] = self.convert_pose_to_grid_position(
             [msg.pose.position.x, msg.pose.position.y])
 
     def swarm_position_callback_2(self, msg: PoseStamped):
+        self.swarm_position_real["drone2"] = (msg.pose.position.x, msg.pose.position.y)
         self.swarm_position["drone2"] = self.convert_pose_to_grid_position(
             [msg.pose.position.x, msg.pose.position.y])
 
     def swarm_position_callback_3(self, msg: PoseStamped):
+        self.swarm_position_real["drone3"] = (msg.pose.position.x, msg.pose.position.y)
         self.swarm_position["drone3"] = self.convert_pose_to_grid_position(
             [msg.pose.position.x, msg.pose.position.y])
 
