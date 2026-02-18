@@ -335,6 +335,7 @@ class AS2GymnasiumEnv(VecEnv):
                 print(f"Failed to reach goal (Invalid action) for drone {drone.drone_id}")
                 self.buf_dones[idx] = False
                 self.wait_for_map()
+                print(f"map stamp: {self.observation_manager.last_map_header_.stamp.nanosec}")
                 frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                     idx)
                 self.invalid_frontiers.append(frontier)

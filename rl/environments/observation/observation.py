@@ -1426,6 +1426,7 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         self.chosen_frontiers = []  # List of frontiers chosen by the drones
         self.wait_for_map = 1
         self.wait_for_frontiers = 0
+        self.last_map_header_ = None
 
     def _obs_from_buf(self) -> VecEnvObs:
         return dict_to_obs(self.observation_space, copy_obs_dict(self.buf_obs))
@@ -1490,7 +1491,7 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         self.grid_matrix[0] = free * 255
         self.grid_matrix[1] = occupied * 255
         self.grid_matrix[2] = unknown * 255
-
+        self.last_map_header_ = msg.header
         self.wait_for_map = 1
 
     def swarm_position_callback_0(self, msg: PoseStamped):
@@ -1602,19 +1603,43 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
     def get_frontiers_and_position_with_msg(self, env_id):
         return self.frontiers, self.position_frontiers
 
+    # def get_frontiers_and_position(self, env_id):
+    #     get_frontiers_req = GetFrontiers.Request()
+    #     get_frontiers_req.explorer_id = f"drone{env_id}"
+    #     get_frontiers_req.header = self.last_map_header_
+    #     get_frontiers_res = self.get_frontiers_srv.call(get_frontiers_req)
+    #     self.frontiers = []
+    #     self.position_frontiers = []
+    #     for frontier in get_frontiers_res.frontiers:
+    #         self.frontiers.append([frontier.point.x, frontier.point.y])
+    #         position_frontier = self.convert_pose_to_grid_position([
+    #             frontier.point.x, frontier.point.y])
+    #         self.position_frontiers.append((position_frontier[0], position_frontier[1]))
+    #     max_area = self.grid_size * self.grid_size
+
+    #     discovered_area = np.sum(self.grid_matrix[2] == 0) / max_area
+    #     return self.frontiers, self.position_frontiers, discovered_area
+
     def get_frontiers_and_position(self, env_id):
         get_frontiers_req = GetFrontiers.Request()
         get_frontiers_req.explorer_id = f"drone{env_id}"
+        get_frontiers_req.header = self.last_map_header_
+
         get_frontiers_res = self.get_frontiers_srv.call(get_frontiers_req)
+        while get_frontiers_res is None or not get_frontiers_res.success:
+            time.sleep(0.05)  # pequeño backoff para no quemar CPU
+            get_frontiers_res = self.get_frontiers_srv.call(get_frontiers_req)
+
         self.frontiers = []
         self.position_frontiers = []
         for frontier in get_frontiers_res.frontiers:
             self.frontiers.append([frontier.point.x, frontier.point.y])
-            position_frontier = self.convert_pose_to_grid_position([
-                frontier.point.x, frontier.point.y])
+            position_frontier = self.convert_pose_to_grid_position(
+                [frontier.point.x, frontier.point.y]
+            )
             self.position_frontiers.append((position_frontier[0], position_frontier[1]))
-        max_area = self.grid_size * self.grid_size
 
+        max_area = self.grid_size * self.grid_size
         discovered_area = np.sum(self.grid_matrix[2] == 0) / max_area
         return self.frontiers, self.position_frontiers, discovered_area
 
