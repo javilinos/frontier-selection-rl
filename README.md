@@ -1,6 +1,4 @@
-# Learning Efficient Frontier Selection with Reinforcement
-Learning for Exploring Unstructured Environments With
-Minimal Sensing
+# Learning Efficient Frontier Selection with Reinforcement Learning for Exploring Unstructured Environments With Minimal Sensing
 
 ## Paper video
 <p align="center">
