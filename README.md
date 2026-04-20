@@ -1,4 +1,6 @@
-# Learning Efficient Frontier Selection with Cross-Attention Policy
+# Learning Efficient Frontier Selection with Reinforcement
+Learning for Exploring Unstructured Environments With
+Minimal Sensing
 
 ## Paper video
 <p align="center">
@@ -10,7 +12,9 @@
   </a>
 </p>
 
-*Code accompanying the MDPI 'Drones' paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
+*Code accompanying the MDPI 'Drones' paper “Learning Efficient Frontier Selection with Reinforcement
+Learning for Exploring Unstructured Environments With
+Minimal Sensing.”*
 
 |                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
 | :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
