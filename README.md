@@ -10,7 +10,7 @@
   </a>
 </p>
 
-*Code accompanying the CORL 2025 paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
+*Code accompanying the MDPI 'Drones' paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
 
 |                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
 | :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
