@@ -664,6 +664,8 @@ class MultiChannelImageObservationWithFrontierFeatures:
         self.grid_matrix[1] = occupied * 255
         self.grid_matrix[2] = unknown * 255
 
+        self.last_map_header_ = msg.header
+
         self.wait_for_map = 1
 
     def put_frontiers_in_grid(self):
@@ -749,6 +751,7 @@ class MultiChannelImageObservationWithFrontierFeatures:
     def get_frontiers_and_position(self, env_id):
         get_frontiers_req = GetFrontiers.Request()
         get_frontiers_req.explorer_id = f"drone{env_id}"
+        get_frontiers_req.header = self.last_map_header_
         get_frontiers_res = self.get_frontiers_srv.call(get_frontiers_req)
         self.frontiers = []
         self.position_frontiers = []
