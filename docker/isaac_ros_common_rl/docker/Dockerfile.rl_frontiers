@@ -5,8 +5,8 @@ FROM ${BASE_IMAGE}
 RUN python3 -m pip install -U stable-baselines3[extra]==2.3.2
 RUN python3 -m pip install -U transforms3d
 RUN python3 -m pip install -U gymnasium==0.29.1
-RUN python3 -m pip install -U numpy==1.23.5
 RUN python3 -m pip uninstall -y opencv-python
 RUN python3 -m pip uninstall -y opencv-python-headless
 RUN python3 -m pip uninstall -y opencv-contrib-python
 RUN python3 -m pip install -U opencv-python-headless
+RUN python3 -m pip install -U 'numpy<2'

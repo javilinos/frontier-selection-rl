@@ -11,7 +11,8 @@ FROM ${BASE_IMAGE}
 
 USER root
 RUN apt-get update && apt-get install -y ros-dev-tools
-
+WORKDIR /root
+RUN git clone -b paper-sim-results https://github.com/javilinos/frontier-selection-rl.git
 # create a folder in /root
 WORKDIR /root/aerostack2_ws/src
 
