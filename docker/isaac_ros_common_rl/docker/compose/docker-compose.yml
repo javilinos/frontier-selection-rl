@@ -20,7 +20,7 @@ services:
       # git
       - ~/.gitconfig:/root/.gitconfig_local
       # working dirs
-      - ~/frontier-selection-rl:/root/frontier-selection-rl
+      # - ~/frontier-selection-rl:/root/frontier-selection-rl
     network_mode: "host"
     command: tail -f /dev/null
     working_dir: /root

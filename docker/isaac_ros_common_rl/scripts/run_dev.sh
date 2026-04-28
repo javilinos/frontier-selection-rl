@@ -139,6 +139,7 @@ fi
 
 # Check if git-lfs is installed.
 git lfs &>/dev/null
+
 if [[ $? -ne 0 ]] ; then
     print_error "git-lfs is not insalled. Please make sure git-lfs is installed before you clone the repo."
     exit 1
@@ -146,7 +147,9 @@ fi
 
 # Check if all LFS files are in place in the repository where this script is running from.
 cd $ROOT
+
 git rev-parse &>/dev/null
+
 if [[ $? -eq 0 ]]; then
     LFS_FILES_STATUS=$(cd $ISAAC_ROS_DEV_DIR && git lfs ls-files | cut -d ' ' -f2)
     for (( i=0; i<${#LFS_FILES_STATUS}; i++ )); do
@@ -287,6 +290,7 @@ print_info "Running $CONTAINER_NAME"
 if [[ $VERBOSE -eq 1 ]]; then
     set -x
 fi
+echo 'llega aqui'
 docker run -it --rm \
     --privileged \
     --network host \
