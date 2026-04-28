@@ -460,6 +460,8 @@ class AS2GymnasiumEnv(VecEnv):
             frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                 self.env_index)
             
+            print(f"drone {self.env_index} printing observation manager frontiers after step: {self.observation_manager.frontiers}")
+
             for frontier in self.observation_manager.frontiers:
                 if frontier in self.shared_frontiers:
                     print("Frontier already chosen")

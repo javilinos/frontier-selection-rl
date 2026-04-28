@@ -346,6 +346,7 @@ class ActorCriticPolicy(BasePolicy):
         #     latent_vf = self.mlp_extractor.forward_critic(vf_features)
         # Evaluate the values for the given observations
         values = self.value_net(latent_vf)
+        print(f"shape of values: {values.shape}")
         distribution = self._get_action_dist_from_latent(logits_pi)
         actions = distribution.get_actions(deterministic=deterministic)
         log_prob = distribution.log_prob(actions)
