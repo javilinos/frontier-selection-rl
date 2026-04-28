@@ -1,6 +1,6 @@
-## Learning Efficient Frontier Selection with Cross-Attention Policy
+## Learning Efficient Frontier Selection with Reinforcement Learning for Exploring Unstructured Environments With Minimal Sensing 
 
-*Code accompanying the CORL 2025 paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
+*Code accompanying the MDPI 'Technologies' paper “Learning Efficient Frontier Selection with Reinforcement Learning for Exploring Unstructured Environments With Minimal Sensing.”*
 
 |                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
 | :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
