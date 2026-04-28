@@ -1,16 +1,8 @@
-# Learning Efficient Frontier Selection with Cross-Attention Policy
+# Learning Efficient Frontier Selection with Reinforcement Learning for Exploring Unstructured Environments With Minimal Sensing
 
-## Paper video
-<p align="center">
-  <a href="https://drive.google.com/file/d/1qokUwRoMvn-T0MlfEWWDSehgdvjaqTrW/preview" target="_blank">
-    <img
-      src="https://drive.google.com/thumbnail?sz=w320&id=1qokUwRoMvn-T0MlfEWWDSehgdvjaqTrW"
-      alt="▶️ Click to play the video"
-    />
-  </a>
-</p>
-
-*Code accompanying the CORL 2025 paper “Learning Efficient Frontier Selection with Cross-Attention Policy for Exploring Unstructured Environments.”*
+*Code accompanying the MDPI 'Drones' paper “Learning Efficient Frontier Selection with Reinforcement
+Learning for Exploring Unstructured Environments With
+Minimal Sensing.”*
 
 |                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
 | :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
