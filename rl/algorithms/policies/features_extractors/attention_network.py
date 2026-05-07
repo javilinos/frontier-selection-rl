@@ -58,9 +58,12 @@ class AttentionExtractor(nn.Module):
         self.mha_critic = nn.MultiheadAttention(
             embed_dim=pointer_hidden_dim, num_heads=4, batch_first=True)
 
-        # Build additional actor layers (if any)
+        # Build additional actor layers (if any).
+        # Input is the attended candidate embedding concatenated with the map embedding
+        # so each candidate's score is conditioned directly on map context (peer positions,
+        # coverage) rather than only through the attention residual.
         actor_layers = []
-        last_dim = pointer_hidden_dim
+        last_dim = pointer_hidden_dim + pointer_hidden_dim
         for layer_dim in pi_layers_dims[1:]:
             actor_layers.append(nn.Linear(last_dim, layer_dim))
             actor_layers.append(activation_fn())
@@ -74,10 +77,13 @@ class AttentionExtractor(nn.Module):
         # Critic network
         # ---------------------------
         # For the critic, we process each candidate and then pool over them.
+        # The pooled candidate vector is concatenated with the map embedding so
+        # that map-only information (peer positions, remaining unknown area)
+        # flows directly into the value head instead of only steering attention.
         critic_hidden_dim = vf_layers_dims[0] if len(vf_layers_dims) > 0 else candidate_feature_dim
         self.critic_encoder = nn.Linear(candidate_feature_dim, critic_hidden_dim)
         critic_layers = []
-        last_critic_dim = critic_hidden_dim
+        last_critic_dim = critic_hidden_dim + pointer_hidden_dim
         for layer_dim in vf_layers_dims[1:]:
             critic_layers.append(nn.Linear(last_critic_dim, layer_dim))
             critic_layers.append(activation_fn())
@@ -120,6 +126,11 @@ class AttentionExtractor(nn.Module):
             # Use a residual connection to combine the original embeddings with the attention output.
             actor_emb = actor_emb + attn_context
 
+            # Concat map embedding to each candidate so the scoring MLP
+            # has direct access to map context (peer positions, coverage).
+            map_expanded = map_emb.expand(-1, actor_emb.size(1), -1)  # (B, N, pointer_hidden_dim)
+            actor_emb = th.cat([actor_emb, map_expanded], dim=-1)     # (B, N, 2*pointer_hidden_dim)
+
             # Process through the additional MLP layers.
             actor_emb = self.actor_mlp(actor_emb)         # (B, num_candidates, last_dim)
             # Compute a score for each candidate.
@@ -149,7 +160,9 @@ class AttentionExtractor(nn.Module):
             critic_emb = critic_emb + attn_context
 
             pooled = critic_emb.mean(dim=1)                       # (B, critic_hidden_dim)
-            latent_value = self.critic_mlp(pooled)                # (B, latent_dim_vf)
+            map_pooled = map_emb.squeeze(1)                       # (B, pointer_hidden_dim)
+            combined = th.cat([pooled, map_pooled], dim=-1)       # (B, critic_hidden_dim + pointer_hidden_dim)
+            latent_value = self.critic_mlp(combined)              # (B, latent_dim_vf)
 
             latent_values_list.append(latent_value)
 

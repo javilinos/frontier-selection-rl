@@ -2,6 +2,8 @@
 import torch.multiprocessing as mp
 import sys
 import time
+import traceback
+import logging
 from copy import deepcopy
 from enum import Enum
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
@@ -285,10 +287,11 @@ class AsyncPPO():
         num_errors = self.num_envs - sum(successes)
         assert num_errors > 0
         for i in range(num_errors):
-            index, exctype, value = self.error_queue.get()
+            index, exctype, value, tb_str = self.error_queue.get()
             logger.error(
                 f"Received the following error from Worker-{index}: {exctype.__name__}: {value}"
             )
+            logger.error(f"Worker-{index} traceback:\n{tb_str}")
             logger.error(f"Shutting down Worker-{index}.")
             self.parent_pipes[index].close()
             self.parent_pipes[index] = None
@@ -304,6 +307,11 @@ class AsyncPPO():
 
 
 def _worker(index, env_fn, pipe, parent_pipe, error_queue):
+    logging.basicConfig(
+        level=logging.ERROR,
+        format=f"[Worker-{index}] %(levelname)s: %(message)s",
+        handlers=[logging.FileHandler(f"worker_{index}.log"), logging.StreamHandler(sys.stderr)],
+    )
     env = env_fn()
     parent_pipe.close()
     try:
@@ -332,13 +340,20 @@ def _worker(index, env_fn, pipe, parent_pipe, error_queue):
                     "`_setattr`, `_check_spaces`}."
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2])
+        tb_str = traceback.format_exc()
+        logging.error(f"Unhandled exception:\n{tb_str}")
+        error_queue.put((index,) + sys.exc_info()[:2] + (tb_str,))
         pipe.send((None, False))
     finally:
         env.close()
 
 
 def _worker_shared_memory(index, env_fn, pipe, parent_pipe, error_queue):
+    logging.basicConfig(
+        level=logging.ERROR,
+        format=f"[Worker-{index}] %(levelname)s: %(message)s",
+        handlers=[logging.FileHandler(f"worker_{index}.log"), logging.StreamHandler(sys.stderr)],
+    )
     env = env_fn()
     parent_pipe.close()
     try:
@@ -367,7 +382,9 @@ def _worker_shared_memory(index, env_fn, pipe, parent_pipe, error_queue):
                     "`_setattr`, `_check_spaces`}."
                 )
     except (KeyboardInterrupt, Exception):
-        error_queue.put((index,) + sys.exc_info()[:2])
+        tb_str = traceback.format_exc()
+        logging.error(f"Unhandled exception:\n{tb_str}")
+        error_queue.put((index,) + sys.exc_info()[:2] + (tb_str,))
         pipe.send((None, False))
     finally:
         env.close()

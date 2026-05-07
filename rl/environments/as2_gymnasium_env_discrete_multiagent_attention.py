@@ -3,6 +3,7 @@ import os
 from threading import BrokenBarrierError
 
 import rclpy
+from rclpy.time import Time
 from as2_python_api.drone_interface_teleop import DroneInterfaceTeleop
 from as2_msgs.srv import SetPoseWithID
 from ros_gz_interfaces.srv import ControlWorld
@@ -109,6 +110,8 @@ class AS2GymnasiumEnv(VecEnv):
         self.path_length = 0
         self.sync_step = True
         self.max_range_limit = 3.0
+        self.map_resolution = (world_size * 2) / grid_size
+        self.max_scan_area_cells = math.pi * (self.max_range_limit / self.map_resolution) ** 2
         print(self.obstacles)
 
     def pause_physics(self) -> bool:
@@ -292,10 +295,11 @@ class AS2GymnasiumEnv(VecEnv):
         finally:
             self.lock.release()
 
+        scan_stamp = self.drone_interface_list[0].get_clock().now()
         self.barrier_reset.wait()
 
         print("Drone", self.drone_interface_list[env_idx].drone_id, " Waiting for map")
-        self.wait_for_map()
+        self.wait_for_map(after_stamp=scan_stamp)
 
         print("Drone", self.drone_interface_list[env_idx].drone_id, " Getting frontiers")
 
@@ -428,7 +432,7 @@ class AS2GymnasiumEnv(VecEnv):
             self.lock.acquire(timeout=5)
             print(f"Drone {drone.drone_id} post lock acquire")
             try:
-                old_map = np.copy(self.observation_manager.grid_matrix[2])    
+                old_map = np.copy(self.observation_manager.grid_matrix[1])
                 future = self.activate_scan_srv.call_async(SetBool.Request(data=True))
                 then = time.time()
                 while rclpy.ok():
@@ -442,8 +446,9 @@ class AS2GymnasiumEnv(VecEnv):
                         future = self.activate_scan_srv.call_async(
                             SetBool.Request(data=True))
                         then = time.time()
-                self.wait_for_map()
-                new_map = np.copy(self.observation_manager.grid_matrix[2])
+                scan_stamp = self.drone_interface_list[0].get_clock().now()
+                self.wait_for_map(after_stamp=scan_stamp)
+                new_map = np.copy(self.observation_manager.grid_matrix[1])
             finally:
                 self.lock.release()
 
@@ -459,7 +464,21 @@ class AS2GymnasiumEnv(VecEnv):
 
             frontiers, position_frontiers, discovered_area = self.observation_manager.get_frontiers_and_position(
                 self.env_index)
-            
+
+            # If the map looks stale (target frontier still present or frontiers within scan range
+            # of drone's current position), retry wait_for_map up to 1000 times
+            for retry in range(1000):
+                target_not_cleared = frontier in self.observation_manager.frontiers
+                if not target_not_cleared:
+                    break
+                print(f"Drone {drone.drone_id}: stale map (retry {retry + 1}/1000), waiting for fresh map...")
+                # self.wait_for_map()
+                # self.observation_manager.get_frontiers_and_position(self.env_index)
+                scan_stamp = self.drone_interface_list[0].get_clock().now()
+                self.wait_for_map(after_stamp=scan_stamp)
+                new_map = np.copy(self.observation_manager.grid_matrix[1])
+                self.observation_manager.get_frontiers_and_position(self.env_index)
+
             print(f"drone {self.env_index} printing observation manager frontiers after step: {self.observation_manager.frontiers}")
 
             for frontier in self.observation_manager.frontiers:
@@ -474,27 +493,32 @@ class AS2GymnasiumEnv(VecEnv):
 
             max_distance = math.sqrt((self.world_size * 2)**2 + (self.world_size * 2)**2)
 
-            max_area = self.grid_size * self.grid_size
+            # Discovery: cells newly observed (free or occupied), normalized by max lidar
+            # scan footprint. Competitive because the map is shared: cells discovered first
+            # by a peer aren't available to be re-discovered, so this drone earns less when
+            # peers are productive. old_map/new_map are the known_mask channel.
+            new_cells = max(0, int(np.sum(new_map == 255) - np.sum(old_map == 255)))
+            discovered_area_rew = min(1.0, new_cells / self.max_scan_area_cells)
 
-            discovered_area_rew = (np.sum(new_map == 0) - 
-                                   np.sum(old_map == 0)) / max_area
+            # Path length: penalize traveling far
+            path_length_rew = -(path_length / max_distance)
 
-            path_length_rew = -(path_length / max_distance)  # Reward based on path length
-
-            distance_to_closest_drone_rew = 0.0
-
+            # Distance to closest peer: penalize proximity to encourage swarm spread
+            min_dist_to_peer = float('inf')
             for drone_id, drone_position in self.observation_manager.swarm_position_real.items():
                 if drone_id != drone.drone_id:
-                    dist = self.distance((drone_position[0], drone_position[1]),
-                                         (drone.position[0], drone.position[1]))
-                    if dist < distance_to_closest_drone_rew or distance_to_closest_drone_rew == 0.0:
-                        distance_to_closest_drone_rew = dist
+                    d = self.distance((drone_position[0], drone_position[1]),
+                                      (drone.position[0], drone.position[1]))
+                    if d < min_dist_to_peer:
+                        min_dist_to_peer = d
 
-            distance_to_closest_drone_rew = - (max_distance - distance_to_closest_drone_rew) / max_distance  # Reward based on distance to closest drone, The closer the worse, to encourage spreading out
+            if min_dist_to_peer == float('inf'):
+                distance_to_closest_drone_rew = 0.0
+            else:
+                distance_to_closest_drone_rew = (min_dist_to_peer / max_distance) - 1.0
 
-            self.buf_infos[idx] = {"distance": path_length}  # TODO: Add info
-            self.buf_rews[idx] = path_length_rew + \
-                distance_to_closest_drone_rew + discovered_area_rew
+            self.buf_infos[idx] = {"distance": path_length}
+            self.buf_rews[idx] = path_length_rew + distance_to_closest_drone_rew + discovered_area_rew
             self.buf_dones[idx] = False
 
             self.check_end_episode_cond(idx, drone)
@@ -575,10 +599,17 @@ class AS2GymnasiumEnv(VecEnv):
         """
         return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
 
-    def wait_for_map(self, timeout_s: float | None = None) -> bool:
+    def wait_for_map(self, timeout_s: float | None = None, after_stamp: rclpy.time.Time | None = None) -> bool:
         self.observation_manager.wait_for_map = 0
         start = time.time()
-        while self.observation_manager.wait_for_map == 0:
+        while True:
+            if self.observation_manager.wait_for_map != 0:
+                if after_stamp is None:
+                    break
+                map_stamp = Time.from_msg(self.observation_manager.last_map_header_.stamp)
+                if map_stamp > after_stamp:
+                    break
+                self.observation_manager.wait_for_map = 0  # stale, keep waiting
             if timeout_s is not None and (time.time() - start) > timeout_s:
                 print("wait_for_map timeout")
                 return False
@@ -614,12 +645,14 @@ class AS2GymnasiumEnv(VecEnv):
             with self.lock:
                 for shared_frontier in self.shared_frontiers:
                     print(f"drone {self.env_index} printing shared frontier ({shared_frontier[0]}, {shared_frontier[1]})")
-                    for frontier in self.observation_manager.frontiers:
-                        if self.distance((shared_frontier[0], shared_frontier[1]), (frontier[0], frontier[1])) <= self.max_range_limit:
-                            frontier_idx = self.observation_manager.frontiers.index(frontier)
-                            self.observation_manager.frontiers.pop(frontier_idx)
-                            self.observation_manager.position_frontiers.pop(frontier_idx)
-                            print(f"shared frontier ({shared_frontier[0]}, {shared_frontier[1]}), within range of frontier ({frontier[0]}, {frontier[1]})")
+                    to_remove = [
+                        i for i, frontier in enumerate(self.observation_manager.frontiers)
+                        if self.distance((shared_frontier[0], shared_frontier[1]), (frontier[0], frontier[1])) <= self.max_range_limit
+                    ]
+                    for i in reversed(to_remove):
+                        print(f"shared frontier ({shared_frontier[0]}, {shared_frontier[1]}), within range of frontier ({self.observation_manager.frontiers[i][0]}, {self.observation_manager.frontiers[i][1]})")
+                        self.observation_manager.frontiers.pop(i)
+                        self.observation_manager.position_frontiers.pop(i)
 
         finish = len(self.observation_manager.frontiers) == 0
         if finish:

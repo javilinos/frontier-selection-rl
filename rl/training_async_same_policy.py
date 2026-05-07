@@ -5,6 +5,7 @@ from gymnasium.spaces import Box, Discrete
 import argparse
 from algorithms.policies.features_extractors.custom_cnn import NatureCNN_Mod
 import time
+import os
 import rclpy
 import cProfile
 import pstats
@@ -15,7 +16,7 @@ from torch.distributions.constraints import Constraint
 from torch.distributions import constraints
 import numpy as np
 from torch.multiprocessing import Manager, Lock, Barrier, Condition, Queue
-from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env.vec_monitor import VecMonitor
 
 from algorithms.policies.custom_policy_attention import ActorCriticPolicy
@@ -29,6 +30,73 @@ import ctypes
 # multiprocessing.set_start_method('forkserver', force=True)
 # multiprocessing.set_start_method('spawn', force=True)
 
+
+class CheckpointCallback(BaseCallback):
+    """
+    Callback for saving a model every ``save_freq`` calls
+    to ``env.step()``.
+    By default, it only saves model checkpoints,
+    you need to pass ``save_replay_buffer=True``,
+    and ``save_vecnormalize=True`` to also save replay buffer checkpoints
+    and normalization statistics checkpoints.
+
+    .. warning::
+
+      When using multiple environments, each call to  ``env.step()``
+      will effectively correspond to ``n_envs`` steps.
+      To account for that, you can use ``save_freq = max(save_freq // n_envs, 1)``
+
+    :param save_freq: Save checkpoints every ``save_freq`` call of the callback.
+    :param save_path: Path to the folder where the model will be saved.
+    :param name_prefix: Common prefix to the saved models
+    :param save_replay_buffer: Save the model replay buffer
+    :param save_vecnormalize: Save the ``VecNormalize`` statistics
+    :param verbose: Verbosity level: 0 for no output, 2 for indicating when saving model checkpoint
+    """
+
+    def __init__(
+        self,
+        save_freq: int,
+        save_path: str,
+        env_index: int = 0,
+        name_prefix: str = "rl_model",
+        save_replay_buffer: bool = False,
+        save_vecnormalize: bool = False,
+        verbose: int = 0,
+    ):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+        self.env_index = env_index
+        self.name_prefix = name_prefix
+        self.save_replay_buffer = save_replay_buffer
+        self.save_vecnormalize = save_vecnormalize
+
+    def _init_callback(self) -> None:
+        # Create folder if needed
+        if self.save_path is not None:
+            os.makedirs(self.save_path, exist_ok=True)
+
+    def _checkpoint_path(self, checkpoint_type: str = "", extension: str = "") -> str:
+        """
+        Helper to get checkpoint path for each type of checkpoint.
+
+        :param checkpoint_type: empty for the model, "replay_buffer_"
+            or "vecnormalize_" for the other checkpoints.
+        :param extension: Checkpoint file extension (zip for model, pkl for others)
+        :return: Path to the checkpoint
+        """
+        return os.path.join(self.save_path, f"{self.name_prefix}_{checkpoint_type}{self.num_timesteps}_steps.{extension}")
+
+    def _on_step(self) -> bool:
+        if self.env_index != 0:
+            return True
+        if self.n_calls % self.save_freq == 0:
+            model_path = self._checkpoint_path(extension="pt")
+            self.model.policy.save(model_path)
+            if self.verbose >= 2:
+                print(f"Saving policy checkpoint to {model_path}")
+        return True
 
 class CustomCallback(BaseCallback):
     """
@@ -197,15 +265,18 @@ class Training:
             batch_size=batch_size,
             n_epochs=n_epochs,
             learning_rate=learning_rate,
+            ent_coef=0.01,
+            clip_range_vf=0.2,
             device="cpu",
             tensorboard_log=f"./tensorboard/{self.env.env_index}",
             policy_kwargs=dict(
+                activation_fn=torch.nn.ReLU,
                 net_arch=dict(pi=pi_net_arch, vf=vf_net_arch),
                 features_extractor_class=NatureCNN_Mod,
                 share_features_extractor=True,
             )
         )
-        self.checkpoint_callback = CheckpointCallback(save_freq=5000, save_path=f'./models/{self.env.env_index}', name_prefix='ppo_model')
+        self.checkpoint_callback = CheckpointCallback(save_freq=5000, save_path='./models', env_index=self.env.env_index, name_prefix='ppo_model')
         print(f"Training with n_steps={n_steps}, batch_size={batch_size}, n_epochs={n_epochs}, \
               learning_rate={learning_rate}, pi_net_arch={pi_net_arch}, vf_net_arch={vf_net_arch}")
 
@@ -309,7 +380,7 @@ if __name__ == "__main__":
     if policy_class != "CnnPolicy":
         raise ValueError("Async attention training only supports CnnPolicy.")
 
-    observation_space = Box(low=0, high=255, shape=(5, 200, 200), dtype=np.uint8)
+    observation_space = Box(low=0, high=255, shape=(4, 200, 200), dtype=np.uint8)
 
     SharedPolicyManager.register('ActorCriticPolicy', ActorCriticPolicy)
     # SharedPolicyManager.register('RolloutBuffer', RolloutBuffer)

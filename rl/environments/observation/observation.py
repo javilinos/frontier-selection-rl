@@ -1357,20 +1357,20 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
 
         if policy_type == "MlpPolicy":
             self.observation_space = Box(low=0, high=1, shape=(
-                grid_size * grid_size * 5 + 2,), dtype=np.float32)
+                grid_size * grid_size * 4 + 2,), dtype=np.float32)
 
         elif policy_type == "MultiInputPolicy":
             self.observation_space = Dict(
                 {
                     "image": Box(
-                        low=0, high=255, shape=(5, grid_size, grid_size), dtype=np.uint8
+                        low=0, high=255, shape=(4, grid_size, grid_size), dtype=np.uint8
                     )
                 }
             )
 
         elif policy_type == "CnnPolicy":
             self.observation_space = Box(
-                low=0, high=255, shape=(5, grid_size, grid_size), dtype=np.uint8
+                low=0, high=255, shape=(4, grid_size, grid_size), dtype=np.uint8
             )
 
         self.policy_type = policy_type
@@ -1410,15 +1410,12 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
             self.swarm_position[f"drone{i}"] = (0, 0)
             self.swarm_position_real[f"drone{i}"] = (0.0, 0.0)
 
-        # self.get_frontiers_pub = self.drone_interface_list[0].create_publisher(
-        #     GetFrontierReq, "/get_frontiers_req", 1
-        # )
-
-        # self.get_frontiers_sub = self.drone_interface_list[0].create_subscription(
-        #     GetFrontierRes, "/get_frontiers_res", self.get_frontiers_callback, 1
-        # )
-
-        self.grid_matrix = np.zeros((5, grid_size, grid_size), dtype=np.uint8)
+        # 4-channel state:
+        #   0: occupancy   (255 if occupied, 0 otherwise)
+        #   1: known mask  (255 if known/explored, 0 if unknown)
+        #   2: frontiers   (Gaussian blobs)
+        #   3: drones      (self full amplitude, peers half amplitude)
+        self.grid_matrix = np.zeros((4, grid_size, grid_size), dtype=np.uint8)
 
         self.frontiers = []  # List of frontiers by coordinates in earth
         self.position_frontiers = []  # List of frontiers by coordinates in grid
@@ -1439,10 +1436,8 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
                 self.buf_obs[key][env_id] = obs[key]
 
     def _get_obs(self, env_id):
-        # position = self.convert_pose_to_grid_position(self.drone_interface_list[env_id].position)
-        # self.put_position_in_grid(position)
         self.put_frontiers_in_grid()
-        self.put_other_drones_in_grid()
+        self.put_drones_in_grid()
         # self.put_drone_in_grid(env_id)
         # self.show_image_with_frontiers()
         # self.save_image_as_csv("frontiers/frontiers.csv", self.grid_matrix[0])
@@ -1473,24 +1468,18 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
             return
         if self.wait_for_map == 1:
             return
-        # Initialize the matrix with zeros
         matrix = np.array(msg.data, dtype=np.float32).reshape((self.grid_size, self.grid_size))
         matrix = matrix.swapaxes(0, 1)
         matrix = np.rot90(matrix, k=1, axes=(0, 1))
         matrix = np.rot90(matrix, k=1, axes=(0, 1))
-        # self.save_image_as_csv("frontiers/frontiers.csv", matrix)
-        # Handle other values: convert all non-zero values to (1 for occupied)
+        # Occ-grid convention: -1 unknown, 0 free, anything else occupied
         matrix[(matrix != 0) & (matrix != -1)] = 1
-        # Handle NaN values: convert NaNs to a specific value (2 for unknown)
-        matrix[matrix == -1] = 2
-        # Convert to uint8 and reshape
-        free = (matrix == 0).astype(np.uint8)
-        occupied = (matrix == 1).astype(np.uint8)
-        unknown = (matrix == 2).astype(np.uint8)
 
-        self.grid_matrix[0] = free * 255
-        self.grid_matrix[1] = occupied * 255
-        self.grid_matrix[2] = unknown * 255
+        occupied = (matrix == 1).astype(np.uint8)
+        known = (matrix != -1).astype(np.uint8)
+
+        self.grid_matrix[0] = occupied * 255
+        self.grid_matrix[1] = known * 255
         self.last_map_header_ = msg.header
         self.wait_for_map = 1
 
@@ -1517,20 +1506,28 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
     def put_frontiers_in_grid(self):
         frontiers_matrix = np.zeros((self.grid_size, self.grid_size))
         for position_frontier in self.position_frontiers:
-            # frontier_position = self.convert_pose_to_grid_position(frontier)
             frontiers_matrix = self.add_gaussian_blob_max(
                 frontiers_matrix, position_frontier, 3, 1)
 
-        self.grid_matrix[3] = frontiers_matrix * 255
+        self.grid_matrix[2] = frontiers_matrix * 255
 
-    def put_other_drones_in_grid(self):
+    def put_drones_in_grid(self):
+        # Single channel for both self and peers; self at amplitude 1.0 (-> 255),
+        # peers at amplitude 0.5 (-> 128). Distinct intensities let the CNN tell
+        # them apart while keeping the channel count low.
         positions_matrix = np.zeros((self.grid_size, self.grid_size))
+        self_id = self.drone_interface_list[0].drone_id
         for drone_id, position in self.swarm_position.items():
-            if drone_id != self.drone_interface_list[0].drone_id:
+            if drone_id != self_id:
                 positions_matrix = self.add_gaussian_blob_max(
-                positions_matrix, position, 3, 1)
+                    positions_matrix, position, 3, 0.5)
 
-        self.grid_matrix[4] = positions_matrix * 255
+        self_position_grid = self.convert_pose_to_grid_position(
+            self.drone_interface_list[0].position)
+        positions_matrix = self.add_gaussian_blob_max(
+            positions_matrix, self_position_grid, 3, 1.0)
+
+        self.grid_matrix[3] = positions_matrix * 255
 
     def put_position_in_grid(self, position):
         position_matrix = np.zeros((self.grid_size, self.grid_size))
@@ -1589,7 +1586,7 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
 
     def save_image_as_txt(self, path: str):
         # image = self.process_image(self.grid_matrix)
-        image = self.grid_matrix[4]
+        image = self.grid_matrix[3]
         with open(path, 'w') as f:
             for row in image:
                 for cell in row:
@@ -1640,12 +1637,8 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
             self.position_frontiers.append((position_frontier[0], position_frontier[1]))
 
         max_area = self.grid_size * self.grid_size
-        discovered_area = np.sum(self.grid_matrix[2] == 0) / max_area
+        discovered_area = np.sum(self.grid_matrix[1] == 255) / max_area
         return self.frontiers, self.position_frontiers, discovered_area
-
-    def get_action_mask(self, env_id):
-        action_mask = self.grid_matrix[0].astype(bool).flatten()
-        return action_mask
 
     def order_frontiers(self, frontiers):
         # Order frontiers from left to right and top to bottom
