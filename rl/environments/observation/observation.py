@@ -1352,25 +1352,30 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         drone_interface_list,
         policy_type: str,
         num_drones: int | None = None,
+        crop_size: int = 100,
     ):
         self.grid_size = grid_size
+        # Egocentric crop side length (in cells). The internal `grid_matrix` keeps
+        # the full world view; the observation returned to the policy is a
+        # `crop_size x crop_size` window centered on the drone.
+        self.crop_size = crop_size
 
         if policy_type == "MlpPolicy":
             self.observation_space = Box(low=0, high=1, shape=(
-                grid_size * grid_size * 4 + 2,), dtype=np.float32)
+                crop_size * crop_size * 4 + 2,), dtype=np.float32)
 
         elif policy_type == "MultiInputPolicy":
             self.observation_space = Dict(
                 {
                     "image": Box(
-                        low=0, high=255, shape=(4, grid_size, grid_size), dtype=np.uint8
+                        low=0, high=255, shape=(4, crop_size, crop_size), dtype=np.uint8
                     )
                 }
             )
 
         elif policy_type == "CnnPolicy":
             self.observation_space = Box(
-                low=0, high=255, shape=(4, grid_size, grid_size), dtype=np.uint8
+                low=0, high=255, shape=(4, crop_size, crop_size), dtype=np.uint8
             )
 
         self.policy_type = policy_type
@@ -1410,11 +1415,12 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
             self.swarm_position[f"drone{i}"] = (0, 0)
             self.swarm_position_real[f"drone{i}"] = (0.0, 0.0)
 
-        # 4-channel state:
-        #   0: occupancy   (255 if occupied, 0 otherwise)
-        #   1: known mask  (255 if known/explored, 0 if unknown)
+        # 4-channel state stored at full world resolution (grid_size x grid_size).
+        # Egocentric crop is applied in `_get_obs` before exposing to the policy:
+        #   0: occupancy   (255 if occupied, 0 otherwise; out-of-world cells set to 255)
+        #   1: known mask  (255 if known/explored, 0 if unknown; out-of-world cells set to 255)
         #   2: frontiers   (Gaussian blobs)
-        #   3: drones      (self full amplitude, peers half amplitude)
+        #   3: peers       (Gaussian blobs at peer positions; self is implicit at crop center)
         self.grid_matrix = np.zeros((4, grid_size, grid_size), dtype=np.uint8)
 
         self.frontiers = []  # List of frontiers by coordinates in earth
@@ -1438,23 +1444,55 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
     def _get_obs(self, env_id):
         self.put_frontiers_in_grid()
         self.put_drones_in_grid()
-        # self.put_drone_in_grid(env_id)
-        # self.show_image_with_frontiers()
-        # self.save_image_as_csv("frontiers/frontiers.csv", self.grid_matrix[0])
+        cropped = self._egocentric_crop(self.grid_matrix)
+
         if self.policy_type == "MlpPolicy":
-            obs = self.grid_matrix.flatten().astype(np.float32)
-            obs = obs / 255
-            position = position / (self.grid_size - 1)
-            position = position.astype(np.float32)
-            obs = np.append(obs, position)
+            obs = cropped.flatten().astype(np.float32) / 255
 
         elif self.policy_type == "MultiInputPolicy":
-            obs = {"image": self.grid_matrix}
+            obs = {"image": cropped}
 
         elif self.policy_type == "CnnPolicy":
-            obs = self.grid_matrix
+            obs = cropped
 
         return obs
+
+    def _egocentric_crop(self, full_grid: np.ndarray) -> np.ndarray:
+        """Crop a `crop_size x crop_size` window centered on the self drone.
+
+        Out-of-world cells are filled with occupancy=255, known_mask=255 (treated as
+        wall) and 0 in the frontiers/peers channels.
+        """
+        self_pos = self.convert_pose_to_grid_position(
+            self.drone_interface_list[0].position)
+        cx, cy = int(self_pos[0]), int(self_pos[1])
+        half = self.crop_size // 2
+
+        out = np.zeros((4, self.crop_size, self.crop_size), dtype=np.uint8)
+        out[0] = 255  # occupancy: out-of-world treated as occupied
+        out[1] = 255  # known_mask: out-of-world treated as known
+
+        win_col_start, win_col_end = cx - half, cx - half + self.crop_size
+        win_row_start, win_row_end = cy - half, cy - half + self.crop_size
+
+        src_col_start = max(0, win_col_start)
+        src_col_end = min(self.grid_size, win_col_end)
+        src_row_start = max(0, win_row_start)
+        src_row_end = min(self.grid_size, win_row_end)
+
+        if src_col_end <= src_col_start or src_row_end <= src_row_start:
+            return out
+
+        dst_col_start = src_col_start - win_col_start
+        dst_col_end = dst_col_start + (src_col_end - src_col_start)
+        dst_row_start = src_row_start - win_row_start
+        dst_row_end = dst_row_start + (src_row_end - src_row_start)
+
+        out[:, dst_row_start:dst_row_end, dst_col_start:dst_col_end] = (
+            full_grid[:, src_row_start:src_row_end, src_col_start:src_col_end]
+        )
+
+        return out
 
     def convert_pose_to_grid_position(self, pose: list[float]):
         desp = (self.grid_size) / 2
@@ -1512,20 +1550,14 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         self.grid_matrix[2] = frontiers_matrix * 255
 
     def put_drones_in_grid(self):
-        # Single channel for both self and peers; self at amplitude 1.0 (-> 255),
-        # peers at amplitude 0.5 (-> 128). Distinct intensities let the CNN tell
-        # them apart while keeping the channel count low.
+        # Egocentric framing: self is implicit at the crop center, so this
+        # channel only encodes peers (full amplitude).
         positions_matrix = np.zeros((self.grid_size, self.grid_size))
         self_id = self.drone_interface_list[0].drone_id
         for drone_id, position in self.swarm_position.items():
             if drone_id != self_id:
                 positions_matrix = self.add_gaussian_blob_max(
-                    positions_matrix, position, 3, 0.5)
-
-        self_position_grid = self.convert_pose_to_grid_position(
-            self.drone_interface_list[0].position)
-        positions_matrix = self.add_gaussian_blob_max(
-            positions_matrix, self_position_grid, 3, 1.0)
+                    positions_matrix, position, 3, 1.0)
 
         self.grid_matrix[3] = positions_matrix * 255
 
@@ -1679,24 +1711,55 @@ class MultiChannelImageObservationWithFrontierFeaturesAsync:
         return distance
 
     def get_frontier_features(self):
-        # For each frontier: rel_pose_x, rel_pose_y, distance, agent_pose_x, agent_pose_y
+        # Fully egocentric per-candidate features (6-dim):
+        #   frontier_rel_dx, frontier_rel_dy: frontier position relative to self,
+        #       normalized by grid_size (range [-1, 1])
+        #   distance: explicit magnitude, normalized by grid diagonal
+        #   coverage_fraction: global scalar (repeated per candidate)
+        #   peer_repel_dx, peer_repel_dy: repulsive-force vector summing
+        #       (rel_pos / d^2) over all peers, then tanh-squashed. Smooth in
+        #       state space and aware of every peer (not just the closest);
+        #       remains agent-count-agnostic.
+        # Repetition of the global scalars across candidates is harmless because
+        # attention's mean-pool collapses constant terms.
         frontier_features = []
 
         position = self.convert_pose_to_grid_position(self.drone_interface_list[0].position)
 
         max_distance = math.sqrt(self.grid_size**2 + self.grid_size**2)
 
+        coverage_fraction = float(
+            np.sum(self.grid_matrix[1] == 255) / (self.grid_size * self.grid_size)
+        )
+
+        # Repulsive-force vector: sum over peers of (peer - self) / |peer - self|^2,
+        # in grid-normalized coordinates. Nearby peers dominate (inverse-square
+        # weighting). EPS softens the singularity when peers overlap. The final
+        # tanh-squash keeps each component in (-1, 1); the scale factor maps a
+        # typical peer at normalized distance ~0.2 to ~0.76 saturation.
+        self_id = self.drone_interface_list[0].drone_id
+        EPS = 1e-3
+        REPEL_SCALE = 0.2
+        raw_dx = 0.0
+        raw_dy = 0.0
+        for drone_id, peer_grid_pos in self.swarm_position.items():
+            if drone_id != self_id:
+                dx_norm = (peer_grid_pos[0] - position[0]) / self.grid_size
+                dy_norm = (peer_grid_pos[1] - position[1]) / self.grid_size
+                d_sq = dx_norm * dx_norm + dy_norm * dy_norm + EPS
+                raw_dx += dx_norm / d_sq
+                raw_dy += dy_norm / d_sq
+        peer_repel_dx = float(math.tanh(raw_dx * REPEL_SCALE))
+        peer_repel_dy = float(math.tanh(raw_dy * REPEL_SCALE))
+
         for frontier_position in self.position_frontiers:
-            # rel_pose_x, rel_pose_y = position[0] - \
-            #     frontier_position[0], position[1] - frontier_position[1]
-            # rel_pose_x, rel_pose_y = rel_pose_x / self.grid_size, rel_pose_y / self.grid_size
             distance = self.euclidean_distance(
                 position[0], frontier_position[0], position[1], frontier_position[1]) / max_distance
-            frontier_pose_x, frontier_pose_y = frontier_position[0] / \
-                self.grid_size, frontier_position[1] / self.grid_size
-            agent_pose_x, agent_pose_y = position[0] / self.grid_size, position[1] / self.grid_size
+            frontier_rel_dx = float((frontier_position[0] - position[0]) / self.grid_size)
+            frontier_rel_dy = float((frontier_position[1] - position[1]) / self.grid_size)
             features = np.array(
-                [frontier_pose_x, frontier_pose_y, distance, agent_pose_x, agent_pose_y])
+                [frontier_rel_dx, frontier_rel_dy, distance,
+                 coverage_fraction, peer_repel_dx, peer_repel_dy])
             frontier_features.append(features)
 
         return frontier_features

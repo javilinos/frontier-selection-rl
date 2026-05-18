@@ -309,8 +309,7 @@ class ActorCriticPolicy(BasePolicy):
         return NatureCNN_Mod(self.observation_space, **self.features_extractor_kwargs)
 
     def make_features_extractor_flatten(self) -> BaseFeaturesExtractor:
-        features_type = spaces.Box(low=0.0, high=1.0, shape=(
-            5,), dtype=np.float32)
+        features_type = spaces.Box(low=0.0, high=1.0, shape=(6,), dtype=np.float32)
         return FlattenExtractor(features_type, **self.features_extractor_kwargs)
 
     def forward(self, obs: th.Tensor, frontier_features: List[th.Tensor], deterministic: bool = False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
@@ -326,8 +325,7 @@ class ActorCriticPolicy(BasePolicy):
         cnn_features = self.extract_features(
             self.observation_space, obs, self.features_extractor_cnn)
         for frontier_feature in frontier_features:
-            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(
-                5,), dtype=np.float32),
+            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(6,), dtype=np.float32),
                 frontier_feature, self.features_extractor_flatten)
             # concat_features = th.cat((cnn_features, flatenned_features), dim=1)
             frontier_features_list.append(flatenned_features)
@@ -459,8 +457,7 @@ class ActorCriticPolicy(BasePolicy):
             self.observation_space, obs, self.features_extractor_cnn)
         for i, frontier_features in enumerate(frontier_features_batch):
             for frontier_feature in frontier_features:
-                flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(
-                    5,), dtype=np.float32),
+                flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(6,), dtype=np.float32),
                     frontier_feature, self.features_extractor_flatten)
                 # concat_features = th.cat((cnn_features[i].unsqueeze(0), flatenned_features), dim=1)
                 frontier_features_list.append(flatenned_features)
@@ -498,8 +495,7 @@ class ActorCriticPolicy(BasePolicy):
         cnn_features = self.extract_features(
             self.observation_space, obs, self.features_extractor_cnn)
         for frontier_feature in frontier_features:
-            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(
-                5,), dtype=np.float32),
+            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(6,), dtype=np.float32),
                 frontier_feature, self.features_extractor_flatten)
             # concat_features = th.cat((cnn_features, flatenned_features), dim=1)
             frontier_features_list.append(flatenned_features)
@@ -523,8 +519,7 @@ class ActorCriticPolicy(BasePolicy):
             self.observation_space, obs, self.features_extractor_cnn)
 
         for frontier_feature in frontier_features:
-            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(
-                5,), dtype=np.float32),
+            flatenned_features = self.extract_features(spaces.Box(low=0.0, high=1.0, shape=(6,), dtype=np.float32),
                 frontier_feature, self.features_extractor_flatten)
             # concat_features = th.cat((cnn_features, flatenned_features), dim=1)
             frontier_features_list.append(flatenned_features)

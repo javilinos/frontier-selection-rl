@@ -204,7 +204,7 @@ class RolloutBuffer(BaseBuffer):
         gamma: float = 0.99,
         n_envs: int = 1,
         frontier_features_space: spaces.Space = spaces.Box(
-            low=0.0, high=1.0, shape=(5,), dtype=np.float32
+            low=0.0, high=1.0, shape=(6,), dtype=np.float32
         ),
         distance_unit: float = 1.0,
         eps: float = 1e-8,

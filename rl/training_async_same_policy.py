@@ -380,7 +380,7 @@ if __name__ == "__main__":
     if policy_class != "CnnPolicy":
         raise ValueError("Async attention training only supports CnnPolicy.")
 
-    observation_space = Box(low=0, high=255, shape=(4, 200, 200), dtype=np.uint8)
+    observation_space = Box(low=0, high=255, shape=(4, 100, 100), dtype=np.uint8)
 
     SharedPolicyManager.register('ActorCriticPolicy', ActorCriticPolicy)
     # SharedPolicyManager.register('RolloutBuffer', RolloutBuffer)
