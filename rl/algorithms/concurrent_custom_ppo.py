@@ -84,7 +84,9 @@ class PPO(OnPolicyAlgorithm):
         barrier_collect_done=None,
         barrier_train_done=None,
         is_learner: bool=False,
-        rollout_pool=None,
+        shared_pool=None,
+        frontier_send_queue=None,
+        frontier_recv_queues=None,
         n_envs_total: int=1,
         n_steps_total: int=0,
     ):
@@ -155,7 +157,9 @@ class PPO(OnPolicyAlgorithm):
         self.is_learner = is_learner
         self.n_envs_total = n_envs_total
         self.n_steps_total = n_steps_total
-        self.rollout_pool = rollout_pool
+        self.shared_pool = shared_pool
+        self.frontier_send_queue = frontier_send_queue
+        self.frontier_recv_queues = frontier_recv_queues
         self.env_barrier_step = env_barrier_step
         self.env_barrier_reset = env_barrier_reset
 
@@ -297,14 +301,15 @@ class PPO(OnPolicyAlgorithm):
         self.env_barrier_step.print_status()
 
         if n_steps == 0:
-            # Export empty buffer and sync
-            self.rollout_pool[self.env.env_index] = rollout_buffer.export()
+            # Empty rollout: commit empty slot and send empty frontier_features list.
+            self.shared_pool.commit_slot(self.env.env_index, rollout_buffer)
+            self.frontier_send_queue.put([])
             self.env_barrier_step.increment()
             self.env_barrier_reset.increment()
             self.barrier_collect_done.wait()
             self.barrier_train_done.wait()
             return True
-        
+
         with th.no_grad():
             for frontier_feature in last_frontier_features:
                 features_list.append(
@@ -316,7 +321,11 @@ class PPO(OnPolicyAlgorithm):
 
         rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
 
-        self.rollout_pool[self.env.env_index] = rollout_buffer.export()
+        # Commit fixed-shape buffer arrays to the shared-memory slot, and send
+        # the variable-length frontier_features list through this worker's queue.
+        self.shared_pool.commit_slot(self.env.env_index, rollout_buffer)
+        n_committed = int(self.shared_pool.n_filled[self.env.env_index].item())
+        self.frontier_send_queue.put(rollout_buffer.frontier_features[:n_committed])
 
         print(f"Drone {self.env.env_index} finished done training.")
         self.barrier_collect_done.wait()
@@ -324,10 +333,13 @@ class PPO(OnPolicyAlgorithm):
 
         if self.is_learner:
             assert self.shared_buffer is not None, "Learner must be constructed with a local shared_buffer"
+            assert self.frontier_recv_queues is not None, "Learner must have read access to all worker queues"
             self.shared_buffer.reset()
             for i in range(self.n_envs_total):
-                data = self.rollout_pool[i]
-                self.shared_buffer.add_from_export(data)
+                ff_i = self.frontier_recv_queues[i].get()
+                self.shared_buffer.add_from_shared_slot(
+                    self.shared_pool, slot_idx=i, frontier_features=ff_i
+                )
 
             # Train using merged buffer but DO NOT permanently replace local rollout_buffer
             old_buffer = self.rollout_buffer

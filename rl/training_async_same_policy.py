@@ -1,3 +1,13 @@
+# Force single-threaded PyTorch BEFORE any torch-touching import. Required
+# because we build the policy in the parent process and then fork() workers:
+# the parent's PyTorch OMP/MKL thread pool would otherwise be inherited by
+# children in a corrupted state, deadlocking the first worker-side forward
+# pass. Must run before `from environments.async_vector_env import AsyncPPO`,
+# which transitively imports torch.
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 from typing import Optional
 from environments.async_vector_env import AsyncPPO
 from environments.as2_gymnasium_env_discrete_multiagent_attention import AS2GymnasiumEnv
@@ -5,11 +15,14 @@ from gymnasium.spaces import Box, Discrete
 import argparse
 from algorithms.policies.features_extractors.custom_cnn import NatureCNN_Mod
 import time
-import os
 import rclpy
 import cProfile
 import pstats
 import torch
+# Belt-and-braces: clamp torch's intra-op and inter-op thread counts so
+# nothing in the parent spins up extra workers before fork.
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
 import signal
 import sys
 from torch.distributions.constraints import Constraint
@@ -20,9 +33,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env.vec_monitor import VecMonitor
 
 from algorithms.policies.custom_policy_attention import ActorCriticPolicy
-from custom_buffer import RolloutBuffer
+from custom_buffer import RolloutBuffer, SharedRolloutPool
 from algorithms.concurrent_custom_ppo import PPO
-from multiprocessing.managers import BaseManager
 from multiprocessing import Value
 import ctypes
 
@@ -120,10 +132,6 @@ class CustomCallback(BaseCallback):
     def _on_rollout_end(self) -> None:
         # Compute and log the means of the rewards and lengths
         pass
-
-
-class SharedPolicyManager(BaseManager):
-    pass
 
 
 class CustomSimplex(Constraint):
@@ -238,8 +246,9 @@ class DynamicEarlyExitBarrier:
 class Training:
     def __init__(self, env: AS2GymnasiumEnv, policy: ActorCriticPolicy, shared_buffer: Optional[RolloutBuffer], policy_lock: None,
                  n_steps: int = 128, rollout_remaining=None, global_timesteps=None, batch_id=None,
-                 barrier_collect_done=None, barrier_train_done=None, rollout_pool=None, env_barrier_step=None,
-                 env_barrier_reset=None,
+                 barrier_collect_done=None, barrier_train_done=None,
+                 shared_pool=None, frontier_send_queue=None, frontier_recv_queues=None,
+                 env_barrier_step=None, env_barrier_reset=None,
                  batch_size: int = 32, n_epochs: int = 5, learning_rate: float = 0.0003,
                  pi_net_arch: list = [128, 128], vf_net_arch: list = [128, 128]):
         self.env = env
@@ -258,7 +267,9 @@ class Training:
             barrier_collect_done=barrier_collect_done,
             barrier_train_done=barrier_train_done,
             is_learner=(self.env.env_index == 0),
-            rollout_pool=rollout_pool,
+            shared_pool=shared_pool,
+            frontier_send_queue=frontier_send_queue,
+            frontier_recv_queues=frontier_recv_queues,
             n_envs_total=N_ENVS,
             n_steps_total=N_TOTAL,
             n_steps=N_TOTAL,
@@ -363,7 +374,6 @@ if __name__ == "__main__":
     shared_frontiers = manager.list()
     drones_initial_positions = manager.list()
     vec_sync = manager.list([False] * N_ENVS)
-    rollout_pool = manager.list([None] * N_ENVS)
 
     # First three for reset
 
@@ -382,12 +392,6 @@ if __name__ == "__main__":
 
     observation_space = Box(low=0, high=255, shape=(4, 100, 100), dtype=np.uint8)
 
-    SharedPolicyManager.register('ActorCriticPolicy', ActorCriticPolicy)
-    # SharedPolicyManager.register('RolloutBuffer', RolloutBuffer)
-
-    manager = SharedPolicyManager()
-    manager.start()
-
     policy_kwargs = dict(
         activation_fn=torch.nn.ReLU,
         net_arch=dict(pi=[128, 128], vf=[128, 128]),
@@ -395,22 +399,39 @@ if __name__ == "__main__":
         share_features_extractor=True,
     )
 
-    policy = manager.ActorCriticPolicy(  # type: ignore[assignment]
+    # Policy lives in a single nn.Module shared across worker processes via
+    # share_memory_(). Workers (forked from this process) inherit the same
+    # underlying parameter tensors; forward passes are local (no IPC). Only
+    # worker 0 (the learner) calls optimizer.step(), which mutates the shared
+    # tensors in place — all other workers see the update once the training
+    # barrier releases.
+    policy = ActorCriticPolicy(
         observation_space,
         action_space,
         ConstantSchedule(learning_rate),
         **policy_kwargs,
     )
-
     policy = policy.to("cpu")
     policy.share_memory()
 
-    # shared_buffer = manager.RolloutBuffer(
-    #     buffer_size=N_TOTAL,              # total decision-events across all agents before update
-    #     observation_space=observation_space,
-    #     action_space=action_space,
-    #     device="cpu",
-    # )
+    # Shared-memory rollout pool: one slot per worker, fixed N_TOTAL capacity.
+    # Replaces the manager.list rollout_pool — no IPC, no pickling.
+    from stable_baselines3.common.preprocessing import get_action_dim
+    shared_pool = SharedRolloutPool(
+        n_workers=N_ENVS,
+        buffer_size=N_TOTAL,
+        obs_shape=observation_space.shape,
+        action_dim=get_action_dim(action_space),
+    )
+
+    # One mp.Queue per worker for sending the variable-length frontier_features
+    # list at end-of-rollout. Queue (not Pipe) is required: pickled
+    # frontier_features can exceed the 64 KB OS pipe buffer on Linux, and all
+    # workers send simultaneously before any reader runs — Pipe.send() would
+    # block all of them before barrier_collect_done, deadlocking the batch.
+    # mp.Queue uses an internal feeder thread that drains asynchronously, so
+    # put() returns immediately regardless of payload size.
+    frontier_queues = [torch.multiprocessing.Queue() for _ in range(N_ENVS)]
 
     def make_training_0():
         local_shared_buffer = RolloutBuffer(
@@ -430,9 +451,9 @@ if __name__ == "__main__":
                               drones_initial_position=drones_initial_positions, vec_sync=vec_sync, step_lengths=step_lengths
                               )
         env = VecMonitor(env)
-        return Training(env=env, policy=policy, shared_buffer=local_shared_buffer,  policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps, 
+        return Training(env=env, policy=policy, shared_buffer=local_shared_buffer, policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps,
                         batch_id=batch_id, barrier_collect_done=barrier_collect_done, barrier_train_done=barrier_train_done, env_barrier_step=barrier_step, env_barrier_reset=barrier_reset,
-                        rollout_pool=rollout_pool)
+                        shared_pool=shared_pool, frontier_send_queue=frontier_queues[0], frontier_recv_queues=frontier_queues)
 
     def make_training_1():
         env = AS2GymnasiumEnv(world_name="world3", world_size=10.0,
@@ -441,9 +462,9 @@ if __name__ == "__main__":
                               drones_initial_position=drones_initial_positions, vec_sync=vec_sync, step_lengths=step_lengths
                               )
         env = VecMonitor(env)
-        return Training(env=env, policy=policy, shared_buffer=None,  policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps, 
+        return Training(env=env, policy=policy, shared_buffer=None, policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps,
                         batch_id=batch_id, barrier_collect_done=barrier_collect_done, barrier_train_done=barrier_train_done, env_barrier_step=barrier_step, env_barrier_reset=barrier_reset,
-                        rollout_pool=rollout_pool)
+                        shared_pool=shared_pool, frontier_send_queue=frontier_queues[1], frontier_recv_queues=None)
 
     def make_training_2():
         env = AS2GymnasiumEnv(world_name="world3", world_size=10.0,
@@ -452,9 +473,9 @@ if __name__ == "__main__":
                               drones_initial_position=drones_initial_positions, vec_sync=vec_sync, step_lengths=step_lengths
                               )
         env = VecMonitor(env)
-        return Training(env=env, policy=policy, shared_buffer=None,  policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps, 
+        return Training(env=env, policy=policy, shared_buffer=None, policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps,
                         batch_id=batch_id, barrier_collect_done=barrier_collect_done, barrier_train_done=barrier_train_done, env_barrier_step=barrier_step, env_barrier_reset=barrier_reset,
-                        rollout_pool=rollout_pool)
+                        shared_pool=shared_pool, frontier_send_queue=frontier_queues[2], frontier_recv_queues=None)
 
     def make_training_3():
         env = AS2GymnasiumEnv(world_name="world3", world_size=10.0,
@@ -463,9 +484,9 @@ if __name__ == "__main__":
                               drones_initial_position=drones_initial_positions, vec_sync=vec_sync, step_lengths=step_lengths
                               )
         env = VecMonitor(env)
-        return Training(env=env, policy=policy, shared_buffer=None,  policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps, 
+        return Training(env=env, policy=policy, shared_buffer=None, policy_lock=lock, rollout_remaining=rollout_remaining, global_timesteps=global_timesteps,
                         batch_id=batch_id, barrier_collect_done=barrier_collect_done, barrier_train_done=barrier_train_done, env_barrier_step=barrier_step, env_barrier_reset=barrier_reset,
-                        rollout_pool=rollout_pool)
+                        shared_pool=shared_pool, frontier_send_queue=frontier_queues[3], frontier_recv_queues=None)
 
     # env = AS2GymnasiumEnv(world_name="world2", world_size=10.0,
     #                       grid_size=200, min_distance=1.0, policy_type="MultiInputPolicy", namespace="drone0")

@@ -485,3 +485,109 @@ class RolloutBuffer(BaseBuffer):
             returns=data_torch[5],
         )
 
+    def add_from_shared_slot(self, shared_pool: "SharedRolloutPool", slot_idx: int,
+                             frontier_features: list) -> int:
+        """Append a worker's slot from the shared-memory pool into this buffer.
+
+        Reads fixed-shape arrays directly from shared-memory tensors (no IPC,
+        no pickling). The variable-length frontier_features list is passed in
+        separately (received over the per-worker mp.Queue by the learner).
+
+        Shape note: shared pool has no n_envs axis. The local RolloutBuffer
+        keeps an n_envs=1 axis as dim-1 of every field — so we add a singleton
+        axis on the way out for observations/actions, and reshape (n,) -> (n,1)
+        for scalar fields.
+        """
+        if self.full:
+            return 0
+        n = int(shared_pool.n_filled[slot_idx].item())
+        if n <= 0:
+            return 0
+
+        n = min(n, self.buffer_size - self.pos)
+        dst = slice(self.pos, self.pos + n)
+        src = slice(0, n)
+
+        # observations: (n, *obs_shape) -> (n, 1, *obs_shape). Cast back to float32.
+        self.observations[dst, 0] = shared_pool.observations[slot_idx, src].numpy().astype(np.float32)
+        # actions: (n, action_dim) -> (n, 1, action_dim)
+        self.actions[dst, 0] = shared_pool.actions[slot_idx, src].numpy()
+        # scalar fields: (n,) -> (n, 1)
+        self.rewards[dst] = shared_pool.rewards[slot_idx, src].numpy().reshape(n, 1)
+        self.episode_starts[dst] = shared_pool.episode_starts[slot_idx, src].numpy().reshape(n, 1)
+        self.values[dst] = shared_pool.values[slot_idx, src].numpy().reshape(n, 1)
+        self.log_probs[dst] = shared_pool.log_probs[slot_idx, src].numpy().reshape(n, 1)
+        self.advantages[dst] = shared_pool.advantages[slot_idx, src].numpy().reshape(n, 1)
+        self.returns[dst] = shared_pool.returns[slot_idx, src].numpy().reshape(n, 1)
+        self.distances[dst] = shared_pool.distances[slot_idx, src].numpy().reshape(n, 1)
+
+        self.frontier_features.extend(frontier_features[:n])
+
+        self.pos += n
+        if self.pos >= self.buffer_size:
+            self.full = True
+        return n
+
+
+class SharedRolloutPool:
+    """Pre-allocated shared-memory rollout storage, one slot per worker.
+
+    Replaces the manager.list-based rollout_pool that pickled ~10MB per worker
+    per rollout through a BaseManager process. All fixed-shape fields live in
+    `torch.zeros(...).share_memory_()` tensors allocated in the parent process;
+    forked workers inherit the same backing storage and read/write their own
+    slot with no IPC.
+
+    Variable-length frontier_features does NOT fit a pre-allocated tensor and
+    travels separately over a per-worker mp.Queue, drained by the learner.
+    """
+
+    def __init__(self, n_workers: int, buffer_size: int, obs_shape, action_dim: int):
+        self.n_workers = n_workers
+        self.buffer_size = buffer_size
+
+        self.observations = th.zeros((n_workers, buffer_size, *obs_shape), dtype=th.uint8).share_memory_()
+        self.actions = th.zeros((n_workers, buffer_size, action_dim), dtype=th.float32).share_memory_()
+        self.rewards = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.episode_starts = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.values = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.log_probs = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.advantages = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.returns = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        self.distances = th.zeros((n_workers, buffer_size), dtype=th.float32).share_memory_()
+        # n_filled[i] = how many timesteps worker i actually committed this rollout.
+        self.n_filled = th.zeros((n_workers,), dtype=th.int32).share_memory_()
+
+    def commit_slot(self, worker_idx: int, buffer: "RolloutBuffer") -> int:
+        """Copy the filled prefix of `buffer` into this worker's shared slot.
+
+        Called by each worker at the end of collect_rollouts. Writes through to
+        shared memory so the learner (worker 0) can read all slots directly.
+
+        Shape note: RolloutBuffer keeps an n_envs axis (always =1 in this setup)
+        as the second dimension of every field — e.g. observations is
+        (buffer_size, 1, 4, 100, 100), rewards is (buffer_size, 1). The shared
+        pool drops that axis (one slot per worker IS the worker), so we
+        squeeze/reshape on the way in.
+        """
+        n = buffer.buffer_size if buffer.full else buffer.pos
+        self.n_filled[worker_idx] = n
+        if n <= 0:
+            return 0
+
+        # observations: (n, 1, *obs_shape) -> (n, *obs_shape). Cast float32 -> uint8.
+        self.observations[worker_idx, :n] = th.from_numpy(
+            buffer.observations[:n, 0].astype(np.uint8)
+        )
+        # actions: (n, 1, action_dim) -> (n, action_dim)
+        self.actions[worker_idx, :n] = th.from_numpy(buffer.actions[:n, 0])
+        # scalar fields: (n, 1) -> (n,)
+        self.rewards[worker_idx, :n] = th.from_numpy(buffer.rewards[:n].reshape(n))
+        self.episode_starts[worker_idx, :n] = th.from_numpy(buffer.episode_starts[:n].reshape(n))
+        self.values[worker_idx, :n] = th.from_numpy(buffer.values[:n].reshape(n))
+        self.log_probs[worker_idx, :n] = th.from_numpy(buffer.log_probs[:n].reshape(n))
+        self.advantages[worker_idx, :n] = th.from_numpy(buffer.advantages[:n].reshape(n))
+        self.returns[worker_idx, :n] = th.from_numpy(buffer.returns[:n].reshape(n))
+        self.distances[worker_idx, :n] = th.from_numpy(buffer.distances[:n].reshape(n))
+        return n
+
