@@ -1,8 +1,6 @@
-# Learning Efficient Frontier Selection with Reinforcement Learning for Exploring Unstructured Environments With Minimal Sensing
+# Efficient Frontier Selection via Reinforcement Learning for Exploring Unstructured Environments with Minimal Sensing
 
-*Code accompanying the MDPI 'Drones' paper “Learning Efficient Frontier Selection with Reinforcement
-Learning for Exploring Unstructured Environments With
-Minimal Sensing.”*
+*Code accompanying the MDPI Technologies paper "Efficient Frontier Selection via Reinforcement Learning for Exploring Unstructured Environments with Minimal Sensing".*
 
 |                             Ours (Low Density)                             |                               Ours (Medium Density)                              |                              Ours (High Density)                              |
 | :------------------------------------------------------------------------: | :------------------------------------------------------------------------------: | :---------------------------------------------------------------------------: |
@@ -14,6 +12,21 @@ Minimal Sensing.”*
 
 ---
 
+If you use this code in your academic work, please cite [our paper](https://doi.org/10.3390/technologies14060365):
+
+```latex
+@article{melero2016efficient,
+   author = {Melero-Deza, Javier and Arias-Perez, Pedro and García Patiño Lenza, Guillermo and Molina, Martin and Campoy, Pascual},
+   title = {Efficient Frontier Selection via Reinforcement Learning for Exploring Unstructured Environments with Minimal Sensing},
+   journal = {Technologies},
+   volume = {14},
+   year = {2026},
+   number = {6},
+   article-number = {365},
+   issn = {2227-7080},
+   doi = {10.3390/technologies14060365}
+}
+```
 
 ---
 
